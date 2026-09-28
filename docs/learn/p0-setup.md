@@ -17,7 +17,7 @@ Phase 0 has no ML in it. It builds the scaffolding that keeps the later phases h
 4. `CONTEXT.md`, `.cursor/rules/tinyserve-workflow.mdc`, `CLAUDE.md`, `AGENTS.md`: agent and workflow instructions.
 5. `scripts/env_info.py`: `collect_env_info()` returns a fixed set of fields (GPU, driver, CUDA, torch, Triton, git commit). Every benchmark result file embeds it, because numbers are meaningless without the hardware and versions that produced them.
 6. `scripts/download_models.sh`, `scripts/download_datasets.sh`: fetch gated Llama weights (needs `HF_TOKEN`) and datasets into the git-ignored `models/` and `data/` directories.
-7. `tinyserve/config.py` (P0.4): added later in this phase.
+7. `tinyserve/config.py`: `TinyServeConfig` groups six section dataclasses. Read `CacheConfig` and `SchedulerConfig` first, since those knobs (`block_size`, `gpu_memory_utilization`, `max_num_batched_tokens`, `max_num_seqs`) drive Phases 3 and 4. `apply_overrides(cfg, {"cache.block_size": "32"})` and the matching `--cache.block_size 32` CLI flag both go through the same type parsing and validation.
 
 ## 3. Key tensors and shapes
 

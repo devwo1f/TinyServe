@@ -35,6 +35,11 @@ Format: `D-<n>` for decisions, `Q-<n>` for open questions. Resolved questions be
 - **Date:** 2026-09-28 (P0.3)
 - **Decision:** `scripts/__init__.py` exists so benchmark code can embed `scripts.env_info.collect_env_info()` in result files (spec Section 11) and tests can import it.
 
+### D-006: Config is torch-free dataclasses with dotted-name overrides
+- **Date:** 2026-09-28 (P0.4)
+- **Decision:** `tinyserve/config.py` has one dataclass per section (`model`, `cache`, `scheduler`, `speculative`, `server`, `benchmark`) under `TinyServeConfig`. Overrides use `<section>.<field>` names from code (`apply_overrides`) and the CLI (`--cache.block_size 32`). Unknown names raise `KeyError`; each section validates itself in `__post_init__`, which re-runs on override via `dataclasses.replace`. `model.dtype = "auto"` is resolved to a real dtype by model code in Phase 1 (bf16 if supported, else fp16; float32 on CPU), so the config never imports torch.
+- **Not included yet:** quantization settings (added in Phase 9 when they have a consumer).
+
 ---
 
 ## Open questions

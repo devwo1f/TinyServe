@@ -22,8 +22,8 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 ## 2. Current status
 
 - **Phase:** 0 (Repository and Environment)
-- **Last completed task:** P0.3 environment scripts
-- **In progress:** P0.4 config
+- **Last completed task:** P0.4 config
+- **In progress:** P0.5 CI
 - **Review gates passed:** none yet
 - **GitHub:** https://github.com/devwo1f/TinyServe (public)
 
@@ -94,11 +94,13 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `uv.lock`, `.python-version` | Locked dependency set; Python pin `3.11` |
 | `README.md` | Short public README (no numbers until result files exist) |
 | `tinyserve/` | Main package. `__init__.py` holds `__version__`. Subpackages (each only an `__init__.py` docstring so far): `model/`, `kv/`, `engine/`, `kernels/`, `spec/`, `quant/`, `server/`. Module files from spec Section 8 are created by the task that implements them, not as empty stubs. |
+| `tinyserve/config.py` | Torch-free settings. `TinyServeConfig` has sections `model` (model path, tokenizer, dtype `auto`/float32/float16/bfloat16, device, max_model_len, seed), `cache` (block_size 16, gpu_memory_utilization 0.9, memory_safety_margin_gib, num_gpu_blocks_override, enable_prefix_caching), `scheduler` (max_num_batched_tokens 2048, max_num_seqs 64, enable_chunked_prefill), `speculative` (enabled, draft_model, num_speculative_tokens, policy, batch_threshold), `server` (host, port, admission_policy fifo/reject/deadline, TTFT/TPOT SLOs), `benchmark` (workload, num_requests, request_rate, warmup, repeats, seed, ignore_eos, output_dir). API: `apply_overrides(cfg, {"cache.block_size": "32"})`, `add_config_args(parser)` adds `--section.field` flags, `config_from_args(args)`, `cfg.to_dict()` |
 | `bench/`, `bench/microbench/` | Benchmark package (empty until Phase 2) |
 | `eval/` | Parity and perplexity evaluation (empty until Phase 1/9) |
 | `tests/fixtures/tiny_llama.json` | Tiny random Llama config in HF `config.json` format: 2 layers, hidden 64, 4 Q heads, 2 KV heads, head_dim 16, vocab 256, intermediate 128, Llama 3 `rope_scaling` |
 | `tests/unit/test_skeleton.py` | Smoke tests: package imports, fixture matches spec Section 6 |
 | `tests/unit/test_env_info.py` | env_info returns all fields; `--json` CLI works |
+| `tests/unit/test_config.py` | Config defaults, overrides, validation, CLI flags |
 | `tests/gpu/test_env_info_gpu.py` | (`gpu`) GPU fields are populated |
 
 ## 7. Environment and hardware
@@ -143,6 +145,7 @@ Full entries are in `docs/DECISIONS.md`.
 - D-003: branch per task, push every commit, merge by PR with merge commits; LF line endings.
 - D-004: torch 2.14.0 pinned, `cu130`/`cpu` extras; numpy base dependency; huggingface_hub is only used through `uv run --with`.
 - D-005: `scripts/` is an importable package (bench code embeds `collect_env_info()`).
+- D-006: config is torch-free dataclasses with dotted overrides; `dtype="auto"` is resolved by model code in Phase 1.
 - Repo is public on GitHub (human choice). Scope of the first execution run: Phase 0 only, then stop for human review.
 
 ## 11. Open questions / known issues
@@ -153,8 +156,7 @@ Full entries are in `docs/DECISIONS.md`.
 
 ## 12. Next steps
 
-1. P0.4 `tinyserve/config.py` (dataclasses + CLI overrides + tests).
-2. P0.5 CI. Then stop for review.
+1. P0.5 GitHub Actions CI (ruff + `pytest -m "not gpu"` with `uv sync --extra cpu`). Then stop for human review.
 
 ## 13. Change log
 
@@ -162,3 +164,4 @@ Full entries are in `docs/DECISIONS.md`.
 - 2026-09-28 P0.1: package skeleton, pyproject/uv (Python 3.11), ruff + pytest config, tiny_llama.json fixture, smoke tests.
 - 2026-09-28 P0.2: spec moved to docs/SPEC.md; PROGRESS, DECISIONS (D-001..D-003, Q-001, Q-002), REFERENCES, learn notes, results/writeup dirs, CLAUDE.md, AGENTS.md.
 - 2026-09-28 P0.3: scripts/env_info.py, download_models.sh, download_datasets.sh; torch 2.14.0 (cu130/cpu extras) and numpy.
+- 2026-09-28 P0.4: tinyserve/config.py (section dataclasses, validation, dotted overrides, CLI flags) + tests.

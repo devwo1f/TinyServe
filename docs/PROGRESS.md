@@ -22,6 +22,16 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-09-28 | Cursor | Task P0.4
+
+**Status:** done
+**What changed:** `tinyserve/config.py`: `TinyServeConfig` with Model/Cache/Scheduler/Speculative/Server/Benchmark dataclasses, validation, `apply_overrides`, `add_config_args`, `config_from_args`, `to_dict`.
+**Tests:** `tests/unit/test_config.py` (defaults, JSON serialization, typed string parsing, immutability of base, unknown field, 6 invalid-value cases, CLI flags). CPU: 17 passed.
+**Results:** none
+**Decisions:** D-006
+**Next step:** P0.5 GitHub Actions CI.
+**Questions for the human:** none
+
 ## 2026-09-28 | Cursor | Task P0.3
 
 **Status:** done

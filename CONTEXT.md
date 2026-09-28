@@ -22,8 +22,8 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 ## 2. Current status
 
 - **Phase:** 0 (Repository and Environment)
-- **Last completed task:** bootstrap (git repo, GitHub remote, this file, Cursor rule)
-- **In progress:** P0.1 project skeleton
+- **Last completed task:** P0.1 project skeleton
+- **In progress:** P0.2 docs scaffolding
 - **Review gates passed:** none yet
 - **GitHub:** https://github.com/devwo1f/TinyServe (public)
 
@@ -79,6 +79,15 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `.cursor/rules/tinyserve-workflow.mdc` | Always-on Cursor rule: read CONTEXT.md first, update it each change, commit format, push after every commit |
 | `.gitignore` | Excludes weights, datasets, secrets, profiler outputs, large results |
 | `.gitattributes` | Forces LF line endings (scripts run on Linux/WSL/CI) |
+| `pyproject.toml` | uv project (Python 3.11 only), dev group `pytest` + `ruff`, pytest markers `gpu`/`slow` (`--strict-markers`), `pythonpath = ["."]`, ruff config (Python files only, line length 100) |
+| `uv.lock`, `.python-version` | Locked dependency set; Python pin `3.11` |
+| `README.md` | Short public README (no numbers until result files exist) |
+| `tinyserve/` | Main package. `__init__.py` holds `__version__`. Subpackages (each only an `__init__.py` docstring so far): `model/`, `kv/`, `engine/`, `kernels/`, `spec/`, `quant/`, `server/`. Module files from spec Section 8 are created by the task that implements them, not as empty stubs. |
+| `bench/`, `bench/microbench/` | Benchmark package (empty until Phase 2) |
+| `eval/` | Parity and perplexity evaluation (empty until Phase 1/9) |
+| `tests/fixtures/tiny_llama.json` | Tiny random Llama config in HF `config.json` format: 2 layers, hidden 64, 4 Q heads, 2 KV heads, head_dim 16, vocab 256, intermediate 128, Llama 3 `rope_scaling` |
+| `tests/unit/test_skeleton.py` | Smoke tests: package imports, fixture matches spec Section 6 |
+| `tests/gpu/` | GPU tests (marked `@pytest.mark.gpu`), empty so far |
 
 ## 7. Environment and hardware
 
@@ -93,7 +102,15 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 
 ## 8. How to run and test
 
-(Filled in as P0.1 lands.)
+```bash
+uv sync                          # creates .venv with Python 3.11 and dev tools
+uv run ruff check .              # lint
+uv run ruff format --check .     # formatting
+uv run pytest -m "not gpu"       # CPU tests (always)
+uv run pytest -m gpu             # GPU tests (when a CUDA GPU is available)
+```
+
+Note: on this Windows machine uv warns it cannot hardlink from its cache (different drive); harmless. Set `UV_LINK_MODE=copy` to silence it.
 
 ## 9. Workflow rules
 
@@ -117,9 +134,10 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 
 ## 12. Next steps
 
-1. P0.1 project skeleton (layout, pyproject, ruff, pytest markers, tiny fixture).
-2. P0.2 docs scaffolding. 3. P0.3 env scripts. 4. P0.4 config. 5. P0.5 CI. Then stop for review.
+1. P0.2 docs scaffolding (also backfills the P0.1 PROGRESS entry, since PROGRESS.md is created there).
+2. P0.3 env scripts. 3. P0.4 config. 4. P0.5 CI. Then stop for review.
 
 ## 13. Change log
 
 - 2026-09-28 bootstrap: git repo, public GitHub remote, CONTEXT.md, Cursor workflow rule, .gitignore, .gitattributes.
+- 2026-09-28 P0.1: package skeleton, pyproject/uv (Python 3.11), ruff + pytest config, tiny_llama.json fixture, smoke tests.

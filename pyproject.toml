@@ -1,0 +1,33 @@
+[project]
+name = "tinyserve"
+version = "0.0.1"
+description = "A small, readable LLM inference serving engine built from scratch in PyTorch and Triton."
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra --strict-markers"
+markers = [
+    "gpu: requires a CUDA GPU (run with -m gpu)",
+    "slow: takes longer than 30 seconds",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+include = ["*.py", "*.pyi", "**/pyproject.toml"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.ruff.format]
+quote-style = "double"

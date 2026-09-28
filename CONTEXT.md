@@ -22,8 +22,8 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 ## 2. Current status
 
 - **Phase:** 0 (Repository and Environment)
-- **Last completed task:** P0.4 config
-- **In progress:** P0.5 CI
+- **Last completed task:** P0.5 CI. **Phase 0 is complete.**
+- **In progress:** nothing. Waiting for the human to review Phase 0 and answer Q-001 before Phase 1 starts.
 - **Review gates passed:** none yet
 - **GitHub:** https://github.com/devwo1f/TinyServe (public)
 
@@ -31,7 +31,7 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 
 | Phase | Content | Status |
 |---|---|---|
-| 0 | Skeleton, docs, env scripts, config, CI | in progress |
+| 0 | Skeleton, docs, env scripts, config, CI | done (awaiting human review) |
 | 1 | From-scratch Llama (RoPE w/ Llama 3 scaling, GQA, SwiGLU), safetensors loading, sampler, naive engine, HF parity | not started |
 | 2 | Benchmark + profiling harness, HF and vLLM baselines | not started |
 | 3 | Paged KV cache, block manager, KV store, reference paged attention, prefix cache | not started |
@@ -92,7 +92,8 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `scripts/download_models.sh` | `bash scripts/download_models.sh [dev / dev-spec / final / <repo ids>]` into `models/<name>` (safetensors, json, tokenizer). Requires `HF_TOKEN`. Uses `uv run --with huggingface_hub hf download` |
 | `scripts/download_datasets.sh` | `bash scripts/download_datasets.sh [sharegpt wikitext humaneval]` into `data/` (raw files; filtering happens in `bench/datasets.py`) |
 | `uv.lock`, `.python-version` | Locked dependency set; Python pin `3.11` |
-| `README.md` | Short public README (no numbers until result files exist) |
+| `README.md` | Short public README with CI badge (no numbers until result files exist) |
+| `.github/workflows/ci.yml` | CI on push to main and PRs: ubuntu, `uv sync --locked --extra cpu`, env_info, ruff check, ruff format --check, `pytest -m "not gpu"` |
 | `tinyserve/` | Main package. `__init__.py` holds `__version__`. Subpackages (each only an `__init__.py` docstring so far): `model/`, `kv/`, `engine/`, `kernels/`, `spec/`, `quant/`, `server/`. Module files from spec Section 8 are created by the task that implements them, not as empty stubs. |
 | `tinyserve/config.py` | Torch-free settings. `TinyServeConfig` has sections `model` (model path, tokenizer, dtype `auto`/float32/float16/bfloat16, device, max_model_len, seed), `cache` (block_size 16, gpu_memory_utilization 0.9, memory_safety_margin_gib, num_gpu_blocks_override, enable_prefix_caching), `scheduler` (max_num_batched_tokens 2048, max_num_seqs 64, enable_chunked_prefill), `speculative` (enabled, draft_model, num_speculative_tokens, policy, batch_threshold), `server` (host, port, admission_policy fifo/reject/deadline, TTFT/TPOT SLOs), `benchmark` (workload, num_requests, request_rate, warmup, repeats, seed, ignore_eos, output_dir). API: `apply_overrides(cfg, {"cache.block_size": "32"})`, `add_config_args(parser)` adds `--section.field` flags, `config_from_args(args)`, `cfg.to_dict()` |
 | `bench/`, `bench/microbench/` | Benchmark package (empty until Phase 2) |
@@ -156,7 +157,8 @@ Full entries are in `docs/DECISIONS.md`.
 
 ## 12. Next steps
 
-1. P0.5 GitHub Actions CI (ruff + `pytest -m "not gpu"` with `uv sync --extra cpu`). Then stop for human review.
+1. Human: review Phase 0, decide Q-001 (WSL2 recommended), accept the Llama license on Hugging Face, and create an `HF_TOKEN`.
+2. P1.1 tokenizer wrapper (adds `transformers` as a dependency; record it in DECISIONS.md), then P1.2 RoPE, P1.3 Llama model (CPU parity on the tiny model), P1.4 weight loading, P1.5 sampler, P1.6 naive engine.
 
 ## 13. Change log
 
@@ -165,3 +167,4 @@ Full entries are in `docs/DECISIONS.md`.
 - 2026-09-28 P0.2: spec moved to docs/SPEC.md; PROGRESS, DECISIONS (D-001..D-003, Q-001, Q-002), REFERENCES, learn notes, results/writeup dirs, CLAUDE.md, AGENTS.md.
 - 2026-09-28 P0.3: scripts/env_info.py, download_models.sh, download_datasets.sh; torch 2.14.0 (cu130/cpu extras) and numpy.
 - 2026-09-28 P0.4: tinyserve/config.py (section dataclasses, validation, dotted overrides, CLI flags) + tests.
+- 2026-09-28 P0.5: GitHub Actions CI (CPU torch, ruff, non-GPU tests), CI badge. Phase 0 complete.

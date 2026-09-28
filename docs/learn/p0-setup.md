@@ -15,7 +15,9 @@ Phase 0 has no ML in it. It builds the scaffolding that keeps the later phases h
 2. `tests/fixtures/tiny_llama.json`: the tiny model config.
 3. `tests/unit/test_skeleton.py`: smoke tests.
 4. `CONTEXT.md`, `.cursor/rules/tinyserve-workflow.mdc`, `CLAUDE.md`, `AGENTS.md`: agent and workflow instructions.
-5. `scripts/env_info.py` (P0.3) and `tinyserve/config.py` (P0.4): added later in this phase.
+5. `scripts/env_info.py`: `collect_env_info()` returns a fixed set of fields (GPU, driver, CUDA, torch, Triton, git commit). Every benchmark result file embeds it, because numbers are meaningless without the hardware and versions that produced them.
+6. `scripts/download_models.sh`, `scripts/download_datasets.sh`: fetch gated Llama weights (needs `HF_TOKEN`) and datasets into the git-ignored `models/` and `data/` directories.
+7. `tinyserve/config.py` (P0.4): added later in this phase.
 
 ## 3. Key tensors and shapes
 
@@ -29,6 +31,8 @@ Nothing. No benchmark numbers exist yet.
 
 - Recent ruff versions also reformat Python code blocks inside Markdown, which would rewrite the spec's snippets. Fixed by restricting ruff to Python files (DECISIONS.md D-002).
 - On Windows, uv warns that it cannot hardlink from its cache when the project is on a different drive. It is harmless; set `UV_LINK_MODE=copy` to silence it.
+- The default PyPI torch differs by platform (CUDA on Linux, CPU on Windows). Explicit `cu130`/`cpu` extras make the build a deliberate choice (D-004).
+- Triton reports `None` on native Windows: official Triton wheels are Linux-only, which is why WSL2 is recommended (Q-001).
 
 ## 6. Self-check questions
 

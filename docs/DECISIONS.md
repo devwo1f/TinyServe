@@ -23,6 +23,18 @@ Format: `D-<n>` for decisions, `Q-<n>` for open questions. Resolved questions be
 - **Date:** 2026-09-28 (bootstrap, human choice)
 - **Decision:** Branches `p<phase>-<task>-<slug>`; every commit is pushed immediately; at task end a PR is opened and merged to `main` with a merge commit (`gh pr merge --merge --delete-branch`) once acceptance criteria and CI pass. `CONTEXT.md` is updated in the same commit as every change so any agent can pick up the project. `.gitattributes` forces LF line endings because scripts run on Linux/WSL/CI.
 
+### D-004: PyTorch 2.14.0 via two mutually exclusive extras (`cu130`, `cpu`); numpy as a base dependency
+- **Date:** 2026-09-28 (P0.3)
+- **Context:** GPU machines need CUDA wheels, while CI needs small CPU wheels. PyPI's default torch is CUDA-only on Linux and CPU-only on Windows, so relying on it gives different builds on different machines.
+- **Decision:** `torch==2.14.0` pinned exactly (latest stable at setup time), resolved from the official PyTorch indexes: `uv sync --extra cu130` on GPU machines (CUDA 13.0; the dev machine's driver 595.97 supports it) and `uv sync --extra cpu` in CI. The extras are declared as conflicting in `[tool.uv]`. Plain `uv run` keeps an already installed torch (inexact sync).
+- **Dependencies added:** `torch` (spec Section 5); `numpy>=2.0` (torch warns without it; benchmarks and statistics tests need it).
+- **Not added:** `huggingface_hub`. The download scripts use `uv run --with huggingface_hub hf download`, so it does not become a project dependency.
+- **Triton:** not installed on native Windows (official wheels are Linux-only; see Q-001). On Linux, torch's CUDA wheel pulls in the matching Triton automatically.
+
+### D-005: `scripts/` is an importable package
+- **Date:** 2026-09-28 (P0.3)
+- **Decision:** `scripts/__init__.py` exists so benchmark code can embed `scripts.env_info.collect_env_info()` in result files (spec Section 11) and tests can import it.
+
 ---
 
 ## Open questions

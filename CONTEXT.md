@@ -22,8 +22,8 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 ## 2. Current status
 
 - **Phase:** 0 (Repository and Environment)
-- **Last completed task:** P0.2 docs scaffolding
-- **In progress:** P0.3 environment scripts
+- **Last completed task:** P0.3 environment scripts
+- **In progress:** P0.4 config
 - **Review gates passed:** none yet
 - **GitHub:** https://github.com/devwo1f/TinyServe (public)
 
@@ -87,7 +87,10 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `.cursor/rules/tinyserve-workflow.mdc` | Always-on Cursor rule: read CONTEXT.md first, update it each change, commit format, push after every commit |
 | `.gitignore` | Excludes weights, datasets, secrets, profiler outputs, large results |
 | `.gitattributes` | Forces LF line endings (scripts run on Linux/WSL/CI) |
-| `pyproject.toml` | uv project (Python 3.11 only), dev group `pytest` + `ruff`, pytest markers `gpu`/`slow` (`--strict-markers`), `pythonpath = ["."]`, ruff config (Python files only, line length 100) |
+| `pyproject.toml` | uv project (Python 3.11 only). Base deps: `numpy`. Torch `2.14.0` via mutually exclusive extras `cu130` (GPU) / `cpu` (CI) from the official PyTorch indexes. Dev group `pytest` + `ruff`. Pytest markers `gpu`/`slow` (`--strict-markers`), `pythonpath = ["."]`. Ruff: Python files only, line length 100 |
+| `scripts/env_info.py` | `collect_env_info() -> dict` with fixed `FIELDS` (timestamp, git commit/dirty, python, platform, cpu, torch, torch_cuda, cudnn, triton, cuda_available, gpu_count/name/memory/compute capability, driver). Missing items are None. `--json` flag. Embedded in every result file |
+| `scripts/download_models.sh` | `bash scripts/download_models.sh [dev / dev-spec / final / <repo ids>]` into `models/<name>` (safetensors, json, tokenizer). Requires `HF_TOKEN`. Uses `uv run --with huggingface_hub hf download` |
+| `scripts/download_datasets.sh` | `bash scripts/download_datasets.sh [sharegpt wikitext humaneval]` into `data/` (raw files; filtering happens in `bench/datasets.py`) |
 | `uv.lock`, `.python-version` | Locked dependency set; Python pin `3.11` |
 | `README.md` | Short public README (no numbers until result files exist) |
 | `tinyserve/` | Main package. `__init__.py` holds `__version__`. Subpackages (each only an `__init__.py` docstring so far): `model/`, `kv/`, `engine/`, `kernels/`, `spec/`, `quant/`, `server/`. Module files from spec Section 8 are created by the task that implements them, not as empty stubs. |
@@ -95,11 +98,12 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `eval/` | Parity and perplexity evaluation (empty until Phase 1/9) |
 | `tests/fixtures/tiny_llama.json` | Tiny random Llama config in HF `config.json` format: 2 layers, hidden 64, 4 Q heads, 2 KV heads, head_dim 16, vocab 256, intermediate 128, Llama 3 `rope_scaling` |
 | `tests/unit/test_skeleton.py` | Smoke tests: package imports, fixture matches spec Section 6 |
-| `tests/gpu/` | GPU tests (marked `@pytest.mark.gpu`), empty so far |
+| `tests/unit/test_env_info.py` | env_info returns all fields; `--json` CLI works |
+| `tests/gpu/test_env_info_gpu.py` | (`gpu`) GPU fields are populated |
 
 ## 7. Environment and hardware
 
-- Dev machine: Windows 11, NVIDIA GeForce RTX 4060 Laptop GPU (8 GB), driver 595.97. No `nvcc` on PATH.
+- Dev machine: Windows 11, NVIDIA GeForce RTX 4060 Laptop GPU (8 GB, compute capability 8.9), driver 595.97. No `nvcc` on PATH. torch 2.14.0+cu130 works natively (CUDA available); Triton is not installed on native Windows.
 - Tools: git 2.52, GitHub CLI 2.87 (logged in as `devwo1f`), uv 0.11. System Python is 3.13; project pins Python 3.11 via uv.
 - Implications:
   - Llama-3.2-1B-Instruct in bf16 (~2.5 GB) fits: Phase 1 to 7 development can be local.
@@ -111,7 +115,9 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 ## 8. How to run and test
 
 ```bash
-uv sync                          # creates .venv with Python 3.11 and dev tools
+uv sync --extra cu130            # GPU machine: .venv with Python 3.11, torch 2.14.0+cu130, dev tools
+uv sync --extra cpu              # CPU-only machine / CI
+uv run python scripts/env_info.py
 uv run ruff check .              # lint
 uv run ruff format --check .     # formatting
 uv run pytest -m "not gpu"       # CPU tests (always)
@@ -135,6 +141,8 @@ Full entries are in `docs/DECISIONS.md`.
 - D-001: Python 3.11 via uv; not an installable package yet (pytest `pythonpath = ["."]`).
 - D-002: ruff only checks Python files (keeps spec Markdown snippets untouched).
 - D-003: branch per task, push every commit, merge by PR with merge commits; LF line endings.
+- D-004: torch 2.14.0 pinned, `cu130`/`cpu` extras; numpy base dependency; huggingface_hub is only used through `uv run --with`.
+- D-005: `scripts/` is an importable package (bench code embeds `collect_env_info()`).
 - Repo is public on GitHub (human choice). Scope of the first execution run: Phase 0 only, then stop for human review.
 
 ## 11. Open questions / known issues
@@ -145,11 +153,12 @@ Full entries are in `docs/DECISIONS.md`.
 
 ## 12. Next steps
 
-1. P0.3 env scripts (`scripts/env_info.py`, `download_models.sh`, `download_datasets.sh`, torch dependency).
-2. P0.4 config. 3. P0.5 CI. Then stop for review.
+1. P0.4 `tinyserve/config.py` (dataclasses + CLI overrides + tests).
+2. P0.5 CI. Then stop for review.
 
 ## 13. Change log
 
 - 2026-09-28 bootstrap: git repo, public GitHub remote, CONTEXT.md, Cursor workflow rule, .gitignore, .gitattributes.
 - 2026-09-28 P0.1: package skeleton, pyproject/uv (Python 3.11), ruff + pytest config, tiny_llama.json fixture, smoke tests.
 - 2026-09-28 P0.2: spec moved to docs/SPEC.md; PROGRESS, DECISIONS (D-001..D-003, Q-001, Q-002), REFERENCES, learn notes, results/writeup dirs, CLAUDE.md, AGENTS.md.
+- 2026-09-28 P0.3: scripts/env_info.py, download_models.sh, download_datasets.sh; torch 2.14.0 (cu130/cpu extras) and numpy.

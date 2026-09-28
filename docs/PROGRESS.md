@@ -22,6 +22,16 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-09-28 | Cursor | Task P0.3
+
+**Status:** done
+**What changed:** `scripts/env_info.py` (+ `scripts/__init__.py`), `scripts/download_models.sh` (dev / dev-spec / final presets, requires `HF_TOKEN`), `scripts/download_datasets.sh` (ShareGPT, WikiText-2, HumanEval); `pyproject.toml` gains `torch==2.14.0` via `cpu`/`cu130` extras and `numpy`.
+**Tests:** `tests/unit/test_env_info.py` (all fields present, `--json` CLI), `tests/gpu/test_env_info_gpu.py` (GPU fields populated). CPU: 4 passed. GPU (RTX 4060 Laptop, native Windows): 1 passed. `env_info.py` prints every field on the GPU machine (`triton` is None on native Windows, as expected). Manually checked: `download_datasets.sh humaneval` downloads, `download_models.sh` exits with an error when `HF_TOKEN` is unset.
+**Results:** none
+**Decisions:** D-004, D-005
+**Next step:** P0.4 `tinyserve/config.py`.
+**Questions for the human:** Q-001 still open (WSL2 recommended for Triton).
+
 ## 2026-09-28 | Cursor | Task P0.2
 
 **Status:** done

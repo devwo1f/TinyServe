@@ -4,13 +4,41 @@ version = "0.0.1"
 description = "A small, readable LLM inference serving engine built from scratch in PyTorch and Triton."
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
-dependencies = []
+dependencies = [
+    "numpy>=2.0",
+]
+
+# PyTorch comes from the official PyTorch wheel indexes. Pick exactly one extra:
+#   uv sync --extra cu130   (GPU machines; CUDA 13.0 wheels, needs driver >= 580)
+#   uv sync --extra cpu     (CI and CPU-only machines)
+[project.optional-dependencies]
+cpu = ["torch==2.14.0"]
+cu130 = ["torch==2.14.0"]
 
 [dependency-groups]
 dev = [
     "pytest>=8.3",
     "ruff>=0.8",
 ]
+
+[tool.uv]
+conflicts = [[{ extra = "cpu" }, { extra = "cu130" }]]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cu130", extra = "cu130" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

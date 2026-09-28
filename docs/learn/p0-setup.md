@@ -19,6 +19,8 @@ Phase 0 has no ML in it. It builds the scaffolding that keeps the later phases h
 6. `scripts/download_models.sh`, `scripts/download_datasets.sh`: fetch gated Llama weights (needs `HF_TOKEN`) and datasets into the git-ignored `models/` and `data/` directories.
 7. `tinyserve/config.py`: `TinyServeConfig` groups six section dataclasses. Read `CacheConfig` and `SchedulerConfig` first, since those knobs (`block_size`, `gpu_memory_utilization`, `max_num_batched_tokens`, `max_num_seqs`) drive Phases 3 and 4. `apply_overrides(cfg, {"cache.block_size": "32"})` and the matching `--cache.block_size 32` CLI flag both go through the same type parsing and validation.
 
+8. `.github/workflows/ci.yml`: every push to `main` and every PR runs ruff and the non-GPU tests on Linux with CPU torch. A PR is merged only when this is green.
+
 ## 3. Key tensors and shapes
 
 None in Phase 0. The first tensors appear in Phase 1 (RoPE cos/sin caches `[max_position, head_dim]`).

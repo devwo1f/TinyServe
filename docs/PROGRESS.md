@@ -22,6 +22,16 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-09-28 | Cursor | Task P0.5
+
+**Status:** done (Phase 0 complete; waiting for human review before Phase 1)
+**What changed:** `.github/workflows/ci.yml` (ubuntu-latest, `uv sync --locked --extra cpu`, env_info, `ruff check`, `ruff format --check`, `pytest -m "not gpu"`); CI badge in README.
+**Tests:** CI on PR #5: pass (torch 2.14.0+cpu on Linux, 17 passed, 1 GPU test deselected). CI on `main` is checked after merge.
+**Results:** none
+**Decisions:** none new
+**Next step:** human reviews Phase 0 and decides Q-001 (WSL2 vs native Windows). Then P1.1 tokenizer wrapper (needs `HF_TOKEN` and the Llama license accepted).
+**Questions for the human:** Q-001 (before Phase 1), Q-002 (before Phase 8).
+
 ## 2026-09-28 | Cursor | Task P0.4
 
 **Status:** done

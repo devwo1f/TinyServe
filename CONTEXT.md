@@ -23,7 +23,7 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 
 - **Phase:** 0 (Repository and Environment)
 - **Last completed task:** P0.5 CI. **Phase 0 is complete.**
-- **In progress:** nothing. Dev environment moved to WSL2 (D-007). Waiting for the human's Phase 0 review, Llama license approval on Hugging Face, and `HF_TOKEN` before Phase 1 starts.
+- **In progress:** nothing. Dev environment is WSL2 (D-007). Llama 3.2 access is approved and `Llama-3.2-1B-Instruct` is downloaded locally. Waiting for the human's Phase 0 review before Phase 1 starts.
 - **Working copy:** `~/TinyServe` inside WSL2 Ubuntu 24.04 (user `abhay`), opened in Cursor via the WSL remote. Do not develop in the old `D:\Projects\TinyServe` Windows copy.
 - **Review gates passed:** none yet
 - **GitHub:** https://github.com/devwo1f/TinyServe (public)
@@ -90,7 +90,7 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `.gitattributes` | Forces LF line endings (scripts run on Linux/WSL/CI) |
 | `pyproject.toml` | uv project (Python 3.11 only). Base deps: `numpy`. Torch `2.14.0` via mutually exclusive extras `cu130` (GPU) / `cpu` (CI) from the official PyTorch indexes. Dev group `pytest` + `ruff`. Pytest markers `gpu`/`slow` (`--strict-markers`), `pythonpath = ["."]`. Ruff: Python files only, line length 100 |
 | `scripts/env_info.py` | `collect_env_info() -> dict` with fixed `FIELDS` (timestamp, git commit/dirty, python, platform, cpu, torch, torch_cuda, cudnn, triton, cuda_available, gpu_count/name/memory/compute capability, driver). Missing items are None. `--json` flag. Embedded in every result file |
-| `scripts/download_models.sh` | `bash scripts/download_models.sh [dev / dev-spec / final / <repo ids>]` into `models/<name>` (safetensors, json, tokenizer). Requires `HF_TOKEN`. Uses `uv run --with huggingface_hub hf download` |
+| `scripts/download_models.sh` | `bash scripts/download_models.sh [dev / dev-spec / final / <repo ids>]` into `models/<name>`. Requires `HF_TOKEN` in the environment (not passed on the command line). One `--include` flag per glob, or the CLI treats extras as filenames and skips the weights. Excludes `original/` (duplicate .pth). Dev model is already at `models/Llama-3.2-1B-Instruct` (safetensors, not committed) |
 | `scripts/download_datasets.sh` | `bash scripts/download_datasets.sh [sharegpt wikitext humaneval]` into `data/` (raw files; filtering happens in `bench/datasets.py`) |
 | `uv.lock`, `.python-version` | Locked dependency set; Python pin `3.11` |
 | `README.md` | Short public README with CI badge (no numbers until result files exist) |
@@ -110,7 +110,7 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 - Dev machine: Windows 11 laptop, NVIDIA GeForce RTX 4060 Laptop GPU (8 GB, compute capability 8.9), driver 595.97.
 - **Development happens in WSL2 Ubuntu 24.04** (D-007): 22 CPU cores and about 15 GB RAM visible, GPU passed through. torch 2.14.0+cu130 with triton 3.8.0; a Triton kernel compiles and runs. Tools in WSL: uv 0.12 (`~/.local/bin`), gh 2.45 (logged in as `devwo1f`), git, gcc 13 (`build-essential`). No CUDA toolkit or `nvcc` is needed for Triton.
 - Native Windows (the old `D:\Projects\TinyServe` copy) also runs torch with CUDA, but has no Triton; it is not used for development anymore.
-- `HF_TOKEN` is set by the human in `~/.bashrc` inside WSL (never committed).
+- `HF_TOKEN` is in `~/.bashrc` inside WSL (`chmod 600`, never committed). Llama 3.2 gating group is approved. `models/Llama-3.2-1B-Instruct/model.safetensors` is downloaded (gitignored). Llama 3.1 8B still needs its own access request before the final benchmarks.
 - Tools: git 2.52, GitHub CLI 2.87 (logged in as `devwo1f`), uv 0.11. System Python is 3.13; project pins Python 3.11 via uv.
 - Implications:
   - Llama-3.2-1B-Instruct in bf16 (~2.5 GB) fits: Phase 1 to 7 development can be local.
@@ -157,11 +157,12 @@ Full entries are in `docs/DECISIONS.md`.
 ## 11. Open questions / known issues
 
 - Q-002: how to fit 3B target + 1B draft for speculative decoding on an 8 GB GPU (INT8 target vs cloud GPU; decide before Phase 8).
-- The human must accept the Llama license on Hugging Face and provide `HF_TOKEN` before Phase 1.
+- Llama 3.1 8B access is still needed before final benchmarks (the 3.2 gating group does not cover it).
+- The HF token was pasted into a chat. The human should revoke it and put a new one in `~/.bashrc`.
 
 ## 12. Next steps
 
-1. Human: review Phase 0, get Llama license approval on Hugging Face (1B, 3B, 8B Instruct), put `HF_TOKEN` in `~/.bashrc` in WSL. Then run `bash scripts/download_models.sh` to fetch the 1B dev model.
+1. Human: review Phase 0. Also revoke the HF token that was pasted in chat and replace the `HF_TOKEN` line in `~/.bashrc`. Request Llama 3.1 8B access when convenient (not needed until the final benchmarks).
 2. P1.1 tokenizer wrapper (adds `transformers` as a dependency; record it in DECISIONS.md), then P1.2 RoPE, P1.3 Llama model (CPU parity on the tiny model), P1.4 weight loading, P1.5 sampler, P1.6 naive engine.
 
 ## 13. Change log
@@ -173,3 +174,4 @@ Full entries are in `docs/DECISIONS.md`.
 - 2026-09-28 P0.4: tinyserve/config.py (section dataclasses, validation, dotted overrides, CLI flags) + tests.
 - 2026-09-28 P0.5: GitHub Actions CI (CPU torch, ruff, non-GPU tests), CI badge. Phase 0 complete.
 - 2026-09-28 env: moved development to WSL2 Ubuntu 24.04 (D-007, resolves Q-001); Triton 3.8.0 verified on the RTX 4060.
+- 2026-09-28 P0.3: fix download_models.sh globs; Llama-3.2-1B-Instruct weights downloaded locally (not committed).

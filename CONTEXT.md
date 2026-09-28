@@ -1,7 +1,7 @@
 # TinyServe: End-to-End Project Context
 
 > Handoff document for any human or AI picking up this project. It is updated in the same commit as every change. If it disagrees with the code, the code wins; fix this file.
-> The full specification is `docs/SPEC.md` (until P0.2 lands it lives at the repo root as `TINYSERVE_SPEC.md`). The spec is the source of truth for *what* to build; this file describes *where the project is now*.
+> The full specification is `docs/SPEC.md`. The spec is the source of truth for *what* to build; this file describes *where the project is now*. Reading order for a new agent: this file, `docs/SPEC.md` Section 3, the latest `docs/PROGRESS.md` entries, all of `docs/DECISIONS.md`.
 
 ---
 
@@ -22,8 +22,8 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 ## 2. Current status
 
 - **Phase:** 0 (Repository and Environment)
-- **Last completed task:** P0.1 project skeleton
-- **In progress:** P0.2 docs scaffolding
+- **Last completed task:** P0.2 docs scaffolding
+- **In progress:** P0.3 environment scripts
 - **Review gates passed:** none yet
 - **GitHub:** https://github.com/devwo1f/TinyServe (public)
 
@@ -74,8 +74,16 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 
 | Path | Purpose |
 |---|---|
-| `TINYSERVE_SPEC.md` | Full build specification (moves to `docs/SPEC.md` in P0.2) |
 | `CONTEXT.md` | This file: end-to-end project context, updated every change |
+| `CLAUDE.md`, `AGENTS.md` | Identical agent instructions for Claude Code / Codex (spec Appendix A plus "read CONTEXT.md first" and the git workflow) |
+| `docs/SPEC.md` | Full build specification (source of truth) |
+| `docs/PROGRESS.md` | Session log, newest first (Appendix B template); human writes review-gate confirmations here |
+| `docs/DECISIONS.md` | Decisions `D-<n>`, open questions `Q-<n>`, loosened tolerances |
+| `docs/REFERENCES.md` | Papers/projects consulted and a "conceptual borrowing" table |
+| `docs/learn/README.md` | Learning-note format, review gates, index of notes |
+| `docs/learn/p0-setup.md` | Phase 0 learning note (updated through P0.5) |
+| `docs/results/` | Raw benchmark JSONL (script-written only), README with rules |
+| `docs/writeup/` | Final technical write-up (Phase 11) |
 | `.cursor/rules/tinyserve-workflow.mdc` | Always-on Cursor rule: read CONTEXT.md first, update it each change, commit format, push after every commit |
 | `.gitignore` | Excludes weights, datasets, secrets, profiler outputs, large results |
 | `.gitattributes` | Forces LF line endings (scripts run on Linux/WSL/CI) |
@@ -122,22 +130,26 @@ Note: on this Windows machine uv warns it cannot hardlink from its cache (differ
 
 ## 10. Decisions summary
 
-- Git workflow: branch per task + push every commit + PR merge (human choice, 2026-09-28).
-- Repo is public on GitHub (human choice).
-- Scope of the first execution run: Phase 0 only, then stop for human review.
+Full entries are in `docs/DECISIONS.md`.
+
+- D-001: Python 3.11 via uv; not an installable package yet (pytest `pythonpath = ["."]`).
+- D-002: ruff only checks Python files (keeps spec Markdown snippets untouched).
+- D-003: branch per task, push every commit, merge by PR with merge commits; LF line endings.
+- Repo is public on GitHub (human choice). Scope of the first execution run: Phase 0 only, then stop for human review.
 
 ## 11. Open questions / known issues
 
-- WSL2 vs native Windows for Triton and vLLM work (decide before Phase 1).
-- How to fit 3B target + 1B draft for speculative decoding on an 8 GB GPU (INT8 target vs cloud GPU).
+- Q-001: WSL2 vs native Windows for Triton and vLLM work (decide before Phase 1; WSL2 recommended).
+- Q-002: how to fit 3B target + 1B draft for speculative decoding on an 8 GB GPU (INT8 target vs cloud GPU; decide before Phase 8).
 - The human must accept the Llama license on Hugging Face and provide `HF_TOKEN` before Phase 1.
 
 ## 12. Next steps
 
-1. P0.2 docs scaffolding (also backfills the P0.1 PROGRESS entry, since PROGRESS.md is created there).
-2. P0.3 env scripts. 3. P0.4 config. 4. P0.5 CI. Then stop for review.
+1. P0.3 env scripts (`scripts/env_info.py`, `download_models.sh`, `download_datasets.sh`, torch dependency).
+2. P0.4 config. 3. P0.5 CI. Then stop for review.
 
 ## 13. Change log
 
 - 2026-09-28 bootstrap: git repo, public GitHub remote, CONTEXT.md, Cursor workflow rule, .gitignore, .gitattributes.
 - 2026-09-28 P0.1: package skeleton, pyproject/uv (Python 3.11), ruff + pytest config, tiny_llama.json fixture, smoke tests.
+- 2026-09-28 P0.2: spec moved to docs/SPEC.md; PROGRESS, DECISIONS (D-001..D-003, Q-001, Q-002), REFERENCES, learn notes, results/writeup dirs, CLAUDE.md, AGENTS.md.

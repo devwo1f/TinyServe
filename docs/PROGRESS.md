@@ -22,6 +22,16 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-09-28 | Cursor | Environment: WSL2 (P0.3 follow-up)
+
+**Status:** done
+**What changed:** installed WSL2 Ubuntu 24.04, `build-essential`, `git`, `gh`, and uv; cloned the repo to `~/TinyServe`; `uv sync --extra cu130`. Recorded D-007 (resolves Q-001) and updated CONTEXT.md.
+**Tests:** in WSL: `uv run pytest -m "not gpu"` 17 passed, `-m gpu` 1 passed, ruff clean. `env_info.py` reports triton 3.8.0. A throwaway Triton vector-add kernel compiled and matched torch on the GPU (not committed).
+**Results:** none
+**Decisions:** D-007
+**Next step:** once the human has Llama access and `HF_TOKEN`, download the 1B model and start P1.1.
+**Questions for the human:** Phase 0 review; Q-002 (before Phase 8).
+
 ## 2026-09-28 | Cursor | Task P0.5
 
 **Status:** done (Phase 0 complete; waiting for human review before Phase 1)

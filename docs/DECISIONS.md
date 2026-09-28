@@ -40,6 +40,11 @@ Format: `D-<n>` for decisions, `Q-<n>` for open questions. Resolved questions be
 - **Decision:** `tinyserve/config.py` has one dataclass per section (`model`, `cache`, `scheduler`, `speculative`, `server`, `benchmark`) under `TinyServeConfig`. Overrides use `<section>.<field>` names from code (`apply_overrides`) and the CLI (`--cache.block_size 32`). Unknown names raise `KeyError`; each section validates itself in `__post_init__`, which re-runs on override via `dataclasses.replace`. `model.dtype = "auto"` is resolved to a real dtype by model code in Phase 1 (bf16 if supported, else fp16; float32 on CPU), so the config never imports torch.
 - **Not included yet:** quantization settings (added in Phase 9 when they have a consumer).
 
+### D-007: Develop in WSL2 Ubuntu 24.04 (resolves Q-001)
+- **Date:** 2026-09-28 (human choice)
+- **Decision:** The working copy lives in the Linux filesystem at `~/TinyServe` (user `abhay`) inside WSL2 Ubuntu 24.04. Cursor connects with the WSL remote. The old native-Windows copy at `D:\Projects\TinyServe` is no longer used for development. Model weights and datasets also stay in the Linux filesystem, because reading from `/mnt/d` is slow.
+- **Verified:** the RTX 4060 Laptop GPU (driver 595.97) is visible in WSL; `uv sync --extra cu130` installs torch 2.14.0+cu130 with triton 3.8.0; a Triton kernel compiles and runs; CPU and GPU tests pass. System packages installed: `build-essential` (Triton needs a C compiler), `git`, `curl`, `gh`.
+
 ---
 
 ## Open questions
@@ -50,7 +55,7 @@ Format: `D-<n>` for decisions, `Q-<n>` for open questions. Resolved questions be
   1. **WSL2 (Ubuntu) for everything from Phase 1** (recommended): official PyTorch + Triton wheels, vLLM runs, same environment as CI and cloud GPUs. Cost: one-time setup; model files should live in the WSL filesystem for speed.
   2. Native Windows with `triton-windows`: no WSL setup, but an unofficial dependency, possible kernel/compiler differences, and vLLM still needs WSL or a cloud machine.
   3. Native Windows for CPU work, cloud Linux GPU for all GPU work.
-- **Status:** open, waiting for the human.
+- **Status:** resolved 2026-09-28: option 1, see D-007.
 
 ### Q-002: How to run speculative decoding dev setup (3B target + 1B draft) on 8 GB? (decide before Phase 8)
 - **Context:** In bf16, Llama-3.2-3B (~6.4 GB) + Llama-3.2-1B (~2.5 GB) weights alone exceed 8 GB before any KV cache.

@@ -23,7 +23,8 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 
 - **Phase:** 0 (Repository and Environment)
 - **Last completed task:** P0.5 CI. **Phase 0 is complete.**
-- **In progress:** nothing. Waiting for the human to review Phase 0 and answer Q-001 before Phase 1 starts.
+- **In progress:** nothing. Dev environment moved to WSL2 (D-007). Waiting for the human's Phase 0 review, Llama license approval on Hugging Face, and `HF_TOKEN` before Phase 1 starts.
+- **Working copy:** `~/TinyServe` inside WSL2 Ubuntu 24.04 (user `abhay`), opened in Cursor via the WSL remote. Do not develop in the old `D:\Projects\TinyServe` Windows copy.
 - **Review gates passed:** none yet
 - **GitHub:** https://github.com/devwo1f/TinyServe (public)
 
@@ -106,13 +107,16 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 
 ## 7. Environment and hardware
 
-- Dev machine: Windows 11, NVIDIA GeForce RTX 4060 Laptop GPU (8 GB, compute capability 8.9), driver 595.97. No `nvcc` on PATH. torch 2.14.0+cu130 works natively (CUDA available); Triton is not installed on native Windows.
+- Dev machine: Windows 11 laptop, NVIDIA GeForce RTX 4060 Laptop GPU (8 GB, compute capability 8.9), driver 595.97.
+- **Development happens in WSL2 Ubuntu 24.04** (D-007): 22 CPU cores and about 15 GB RAM visible, GPU passed through. torch 2.14.0+cu130 with triton 3.8.0; a Triton kernel compiles and runs. Tools in WSL: uv 0.12 (`~/.local/bin`), gh 2.45 (logged in as `devwo1f`), git, gcc 13 (`build-essential`). No CUDA toolkit or `nvcc` is needed for Triton.
+- Native Windows (the old `D:\Projects\TinyServe` copy) also runs torch with CUDA, but has no Triton; it is not used for development anymore.
+- `HF_TOKEN` is set by the human in `~/.bashrc` inside WSL (never committed).
 - Tools: git 2.52, GitHub CLI 2.87 (logged in as `devwo1f`), uv 0.11. System Python is 3.13; project pins Python 3.11 via uv.
 - Implications:
   - Llama-3.2-1B-Instruct in bf16 (~2.5 GB) fits: Phase 1 to 7 development can be local.
   - 3B target + 1B draft (~9 GB bf16) does not fit in 8 GB: needs INT8 target or a cloud GPU (open question).
   - Final Llama-3.1-8B benchmarks need an A100/H100 (cloud).
-  - Triton has no official native-Windows support and vLLM needs Linux: WSL2 recommended from Phase 1 (open question).
+  - Triton has no official native-Windows support and vLLM needs Linux: hence WSL2 (D-007).
 - CPU-only unit tests use a tiny random Llama config (`tests/fixtures/tiny_llama.json`, added in P0.1).
 
 ## 8. How to run and test
@@ -147,17 +151,17 @@ Full entries are in `docs/DECISIONS.md`.
 - D-004: torch 2.14.0 pinned, `cu130`/`cpu` extras; numpy base dependency; huggingface_hub is only used through `uv run --with`.
 - D-005: `scripts/` is an importable package (bench code embeds `collect_env_info()`).
 - D-006: config is torch-free dataclasses with dotted overrides; `dtype="auto"` is resolved by model code in Phase 1.
+- D-007: develop in WSL2 Ubuntu 24.04 at `~/TinyServe` (resolves Q-001).
 - Repo is public on GitHub (human choice). Scope of the first execution run: Phase 0 only, then stop for human review.
 
 ## 11. Open questions / known issues
 
-- Q-001: WSL2 vs native Windows for Triton and vLLM work (decide before Phase 1; WSL2 recommended).
 - Q-002: how to fit 3B target + 1B draft for speculative decoding on an 8 GB GPU (INT8 target vs cloud GPU; decide before Phase 8).
 - The human must accept the Llama license on Hugging Face and provide `HF_TOKEN` before Phase 1.
 
 ## 12. Next steps
 
-1. Human: review Phase 0, decide Q-001 (WSL2 recommended), accept the Llama license on Hugging Face, and create an `HF_TOKEN`.
+1. Human: review Phase 0, get Llama license approval on Hugging Face (1B, 3B, 8B Instruct), put `HF_TOKEN` in `~/.bashrc` in WSL. Then run `bash scripts/download_models.sh` to fetch the 1B dev model.
 2. P1.1 tokenizer wrapper (adds `transformers` as a dependency; record it in DECISIONS.md), then P1.2 RoPE, P1.3 Llama model (CPU parity on the tiny model), P1.4 weight loading, P1.5 sampler, P1.6 naive engine.
 
 ## 13. Change log
@@ -168,3 +172,4 @@ Full entries are in `docs/DECISIONS.md`.
 - 2026-09-28 P0.3: scripts/env_info.py, download_models.sh, download_datasets.sh; torch 2.14.0 (cu130/cpu extras) and numpy.
 - 2026-09-28 P0.4: tinyserve/config.py (section dataclasses, validation, dotted overrides, CLI flags) + tests.
 - 2026-09-28 P0.5: GitHub Actions CI (CPU torch, ruff, non-GPU tests), CI badge. Phase 0 complete.
+- 2026-09-28 env: moved development to WSL2 Ubuntu 24.04 (D-007, resolves Q-001); Triton 3.8.0 verified on the RTX 4060.

@@ -22,6 +22,16 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-09-28 | Cursor | P0.3 follow-up: model download
+
+**Status:** done
+**What changed:** `scripts/download_models.sh` repeats `--include` once per glob (the CLI was treating extra patterns as filenames and skipping the weights) and no longer passes the token on the command line. Downloaded `models/Llama-3.2-1B-Instruct` including `model.safetensors` (gitignored).
+**Tests:** no code tests; download completed and the safetensors file is present. Ruff/pytest unchanged (shell script only).
+**Results:** none
+**Decisions:** none
+**Next step:** human reviews Phase 0, then P1.1 tokenizer wrapper.
+**Questions for the human:** revoke the HF token that was pasted in chat and replace it in `~/.bashrc`. Llama 3.1 8B access is still separate.
+
 ## 2026-09-28 | Cursor | Environment: WSL2 (P0.3 follow-up)
 
 **Status:** done

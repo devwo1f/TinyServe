@@ -31,9 +31,14 @@ esac
 for repo in "${repos[@]}"; do
   dest="${MODELS_DIR}/${repo#*/}"
   echo "==> ${repo} -> ${dest}"
-  # Only safetensors, configs, and tokenizer files; skip the original/ consolidated .pth copy.
+  # One --include per pattern: the CLI treats extra arguments as filenames and then
+  # ignores --include, which silently skips the weights. HF_TOKEN is read from the
+  # environment (passing --token would put the secret on the process command line).
+  # original/ holds a duplicate .pth copy of the weights; safetensors is enough.
   uv run --with huggingface_hub hf download "${repo}" \
-    --include "*.safetensors" "*.json" "tokenizer*" \
-    --local-dir "${dest}" \
-    --token "${HF_TOKEN}"
+    --include "*.safetensors" \
+    --include "*.json" \
+    --include "tokenizer*" \
+    --exclude "original/*" \
+    --local-dir "${dest}"
 done

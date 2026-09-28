@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Secrets
+.env
+.env.*
+*.token
+
+# Model weights and checkpoints (download with scripts/download_models.sh)
+models/
+checkpoints/
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.gguf
+
+# Datasets (download with scripts/download_datasets.sh)
+data/
+datasets/
+
+# Profiler outputs
+*.nsys-rep
+*.ncu-rep
+*.qdrep
+*.sqlite
+profiles/
+
+# Large raw results: keep results under 5 MB; larger artifacts stay local
+docs/results/**/*.large.jsonl
+docs/results/**/raw/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

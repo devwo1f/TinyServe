@@ -1,0 +1,31 @@
+---
+description: TinyServe session and change workflow (context file, commits, pushes)
+alwaysApply: true
+---
+
+# TinyServe workflow rules
+
+## Session start
+1. Read `CONTEXT.md` (end-to-end project context) first.
+2. Read `docs/SPEC.md` Section 3 (Agent Rules), the latest entries of `docs/PROGRESS.md`, and all of `docs/DECISIONS.md`.
+3. Pick the next unclaimed task from `docs/SPEC.md` Section 13. Do not start a new phase until the human has confirmed the review gate in `docs/PROGRESS.md`.
+
+## Every change
+1. Work on a task branch named `p<phase>-<task>-<slug>` (e.g. `p3-2-block-manager`), never directly on `main` (except bootstrap).
+2. Keep diffs small (rarely over 400 changed lines per commit). Tests go in the same commit as the code.
+3. Run `uv run ruff check .` and `uv run pytest -m "not gpu"` before committing (plus `-m gpu` when a GPU is available).
+4. Update `CONTEXT.md` in the same commit: current status, repo map entries for new/changed files, new contracts or decisions, next steps, and one line in its change log.
+5. Commit with message `P<phase>.<task>: <short description>`.
+6. Push immediately after every commit: `git push -u origin <branch>`.
+
+## Task end
+1. Append a `docs/PROGRESS.md` entry (Appendix B template) and write/update the `docs/learn/` note.
+2. Open a PR with `gh pr create --fill --base main`, wait for CI to be green, then `gh pr merge --merge --delete-branch`.
+3. `git checkout main && git pull`, and make sure `CONTEXT.md` on `main` reflects the merged state.
+
+## Hard rules
+- Never fabricate or hand-edit benchmark numbers; numbers come only from committed result files under `docs/results/`.
+- Never copy code from vLLM, SGLang, Nano-vLLM, gpt-fast, FlashInfer, etc. Record conceptual borrowing in `docs/REFERENCES.md`.
+- Every optimized path needs a reference implementation and a comparison test.
+- Shape comments on tensor-producing lines; docstrings explain *why*.
+- Never commit weights, HF tokens, or datasets.

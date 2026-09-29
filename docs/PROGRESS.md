@@ -22,6 +22,20 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-09-29 | HUMAN (via session) | Gate after Phase 0 passed
+
+Human asked to start Phase 1.
+
+## 2026-09-29 | Cursor | Task P1.1
+
+**Status:** done
+**What changed:** `tinyserve/model/tokenizer.py`: `Tokenizer` (encode, decode, chat template, eos/bos) and `IncrementalDetokenizer` (holds back a trailing U+FFFD so a character split across tokens is not streamed as a replacement box). Added `transformers==5.17.0` (D-008).
+**Tests:** `tests/unit/test_tokenizer.py`. CPU: byte-level fixture tests always run; Llama round-trip, chat template, and incremental non-ASCII run when `models/Llama-3.2-1B-Instruct` is present (passed in WSL). CI skips the Llama tests because the tokenizer is gated and not committed.
+**Results:** none
+**Decisions:** D-008
+**Next step:** P1.2 RoPE, including Llama 3 frequency scaling, matched against Hugging Face in float32.
+**Questions for the human:** none
+
 ## 2026-09-28 | Cursor | P0.3 follow-up: model download
 
 **Status:** done

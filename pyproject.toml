@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11,<3.12"
 dependencies = [
     "numpy>=2.0",
+    "transformers==5.17.0",
 ]
 
 # PyTorch comes from the official PyTorch wheel indexes. Pick exactly one extra:

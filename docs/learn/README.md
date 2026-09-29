@@ -31,3 +31,4 @@ Confirm a gate by adding `## <YYYY-MM-DD> | HUMAN | Gate after Phase <n> passed`
 | Note | Topic |
 |---|---|
 | [p0-setup.md](p0-setup.md) | Phase 0: repo layout, uv, pytest markers, the tiny test model, git workflow |
+| [p1-1-tokenizer.md](p1-1-tokenizer.md) | Tokenizer, chat template, streaming detokenization |

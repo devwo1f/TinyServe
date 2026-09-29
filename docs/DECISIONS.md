@@ -45,6 +45,12 @@ Format: `D-<n>` for decisions, `Q-<n>` for open questions. Resolved questions be
 - **Decision:** The working copy lives in the Linux filesystem at `~/TinyServe` (user `abhay`) inside WSL2 Ubuntu 24.04. Cursor connects with the WSL remote. The old native-Windows copy at `D:\Projects\TinyServe` is no longer used for development. Model weights and datasets also stay in the Linux filesystem, because reading from `/mnt/d` is slow.
 - **Verified:** the RTX 4060 Laptop GPU (driver 595.97) is visible in WSL; `uv sync --extra cu130` installs torch 2.14.0+cu130 with triton 3.8.0; a Triton kernel compiles and runs; CPU and GPU tests pass. System packages installed: `build-essential` (Triton needs a C compiler), `git`, `curl`, `gh`.
 
+### D-008: `transformers==5.17.0` for the tokenizer and, later, numerical reference
+- **Date:** 2026-09-29 (P1.1)
+- **Context:** Spec Section 5 says Hugging Face `transformers` is used for the tokenizer, the chat template, and as a correctness reference, not as the serving engine.
+- **Decision:** Pin `transformers==5.17.0` (pulls `tokenizers` and `safetensors`). `Tokenizer.from_pretrained` sets `clean_up_tokenization_spaces=False` because that post-process is for WordPiece and corrupts byte-level BPE. In this version `apply_chat_template(..., tokenize=True)` returns a `BatchEncoding`; the wrapper reads `input_ids`.
+- **Not a serving dependency:** model forward, KV cache, and sampling stay in TinyServe code.
+
 ---
 
 ## Open questions

@@ -22,8 +22,8 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 ## 2. Current status
 
 - **Phase:** 1 (Correct model and naive generation)
-- **Last completed task:** P1.2 RoPE
-- **In progress:** P1.3 Llama model. Dev environment is WSL2 (D-007). Llama 3.2 access is approved and `Llama-3.2-1B-Instruct` is downloaded locally. Human asked to start Phase 1 on 2026-09-29.
+- **Last completed task:** P1.3 Llama model
+- **In progress:** P1.4 weight loading. Dev environment is WSL2 (D-007). Llama 3.2 access is approved and `Llama-3.2-1B-Instruct` is downloaded locally. Human asked to start Phase 1 on 2026-09-29.
 - **Working copy:** `~/TinyServe` inside WSL2 Ubuntu 24.04 (user `abhay`), opened in Cursor via the WSL remote. Do not develop in the old `D:\Projects\TinyServe` Windows copy.
 - **Review gates passed:** none yet
 - **GitHub:** https://github.com/devwo1f/TinyServe (public)
@@ -33,7 +33,7 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 | Phase | Content | Status |
 |---|---|---|
 | 0 | Skeleton, docs, env scripts, config, CI | done (human asked to start Phase 1) |
-| 1 | From-scratch Llama (RoPE w/ Llama 3 scaling, GQA, SwiGLU), safetensors loading, sampler, naive engine, HF parity | in progress (P1.2 done) |
+| 1 | From-scratch Llama (RoPE w/ Llama 3 scaling, GQA, SwiGLU), safetensors loading, sampler, naive engine, HF parity | in progress (P1.3 done) |
 | 2 | Benchmark + profiling harness, HF and vLLM baselines | not started |
 | 3 | Paged KV cache, block manager, KV store, reference paged attention, prefix cache | not started |
 | 4 | Continuous batching scheduler, chunked prefill, preemption, engine step loop | not started |
@@ -98,6 +98,7 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `tinyserve/` | Main package. `__init__.py` holds `__version__`. Subpackages: `model/`, `kv/`, `engine/`, `kernels/`, `spec/`, `quant/`, `server/`. Module files from spec Section 8 are created by the task that implements them. |
 | `tinyserve/model/tokenizer.py` | `Tokenizer` wraps HF: `from_pretrained`, `encode` (no special tokens by default), `decode`, `apply_chat_template`, `eos_token_id` (`<\|eot_id\|>` for Llama 3 Instruct), `bos_token_id`. `IncrementalDetokenizer.add` decodes the full id list and holds back a trailing U+FFFD so a character split across tokens is not streamed as a replacement box. `finish` flushes the tail. |
 | `tinyserve/model/rope.py` | `compute_inv_freq` (`[head_dim/2]`), Llama 3 wavelength scaling via `RopeScaling`, `rotary_cos_sin` (`[batch, seq, head_dim]`), `apply_rotary`. Checked against HF within 1e-5, including positions past 8192. |
+| `tinyserve/model/llama.py` | `LlamaModelConfig`, `RMSNorm` (variance in fp32), `Attention` (GQA, SDPA), `MLP` (SwiGLU), `DecoderLayer`, `LlamaModel`, `LlamaForCausalLM`. `ContiguousKVCache` is `[num_layers, batch, max_len, num_kv_heads, head_dim]`. Parameter names match HF. Tied embeddings share `lm_head.weight` with `embed_tokens.weight`. Decode uses an explicit causal mask because `is_causal=True` on this PyTorch does not align a short query to the end of a longer cache. |
 | `tinyserve/config.py` | Torch-free settings. `TinyServeConfig` has sections `model` (model path, tokenizer, dtype `auto`/float32/float16/bfloat16, device, max_model_len, seed), `cache` (block_size 16, gpu_memory_utilization 0.9, memory_safety_margin_gib, num_gpu_blocks_override, enable_prefix_caching), `scheduler` (max_num_batched_tokens 2048, max_num_seqs 64, enable_chunked_prefill), `speculative` (enabled, draft_model, num_speculative_tokens, policy, batch_threshold), `server` (host, port, admission_policy fifo/reject/deadline, TTFT/TPOT SLOs), `benchmark` (workload, num_requests, request_rate, warmup, repeats, seed, ignore_eos, output_dir). API: `apply_overrides(cfg, {"cache.block_size": "32"})`, `add_config_args(parser)` adds `--section.field` flags, `config_from_args(args)`, `cfg.to_dict()` |
 | `bench/`, `bench/microbench/` | Benchmark package (empty until Phase 2) |
 | `eval/` | Parity and perplexity evaluation (empty until Phase 1/9) |
@@ -107,6 +108,7 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `tests/unit/test_config.py` | Config defaults, overrides, validation, CLI flags |
 | `tests/unit/test_tokenizer.py` | Round-trip, chat template, and incremental detokenization. A tiny byte-level BPE always runs. Llama 3.2 tests run only if `models/Llama-3.2-1B-Instruct/tokenizer.json` exists (skipped in CI). |
 | `tests/unit/test_rope.py` | Default and Llama 3 RoPE match Hugging Face cos/sin and rotated q/k within 1e-5. |
+| `tests/unit/test_llama.py` | Tiny-model CPU float32 logits within 1e-4 of HF, tied embeddings, cache decode matches a full forward. |
 | `tests/gpu/test_env_info_gpu.py` | (`gpu`) GPU fields are populated |
 
 ## 7. Environment and hardware
@@ -167,7 +169,7 @@ Full entries are in `docs/DECISIONS.md`.
 
 ## 12. Next steps
 
-1. P1.3 Llama model (CPU float32 parity on the tiny model), then P1.4 safetensors load and GPU parity, P1.5 sampler, P1.6 naive engine.
+1. P1.4 safetensors load and GPU greedy parity (Section 12), then P1.5 sampler, P1.6 naive engine.
 2. Human: revoke the HF token that was pasted in chat and replace the `HF_TOKEN` line in `~/.bashrc`. Request Llama 3.1 8B access before the final benchmarks.
 
 ## 13. Change log
@@ -182,3 +184,4 @@ Full entries are in `docs/DECISIONS.md`.
 - 2026-09-28 P0.3: fix download_models.sh globs; Llama-3.2-1B-Instruct weights downloaded locally (not committed).
 - 2026-09-29 P1.1: Tokenizer wrapper, chat template, incremental detokenizer; transformers 5.17.0.
 - 2026-09-29 P1.2: RoPE with Llama 3 frequency scaling, matched to Hugging Face within 1e-5.
+- 2026-09-29 P1.3: Llama model with contiguous KV cache; CPU float32 logits match HF within 1e-4 on the tiny model.

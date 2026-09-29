@@ -22,6 +22,16 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-09-29 | Cursor | Task P1.2
+
+**Status:** done
+**What changed:** `tinyserve/model/rope.py`: inverse frequencies, Llama 3 wavelength scaling, cos/sin caches, and `apply_rotary`.
+**Tests:** `tests/unit/test_rope.py`. CPU float32: default RoPE and Llama 3 scaling match Hugging Face cos/sin and rotated q/k within 1e-5, including positions 8192, 8193, and 20000 (past the original context of 8192).
+**Results:** none
+**Decisions:** none. Conceptual note in REFERENCES.md.
+**Next step:** P1.3 Llama model with contiguous KV cache, CPU float32 logit parity under 1e-4 on the tiny model.
+**Questions for the human:** none
+
 ## 2026-09-29 | HUMAN (via session) | Gate after Phase 0 passed
 
 Human asked to start Phase 1.

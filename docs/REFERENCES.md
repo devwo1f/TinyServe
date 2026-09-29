@@ -32,4 +32,4 @@ Links for AdaSpec and Nightjar are added when the papers are read.
 
 | Date | Task | Source | What was borrowed (conceptually) |
 |---|---|---|---|
-| (none yet) | | | |
+| 2026-09-29 | P1.2 | Llama 3 RoPE scaling, as documented in the checkpoint config and checked against `transformers` | Long wavelengths are divided by `factor`, short wavelengths are unchanged, and the band between `low_freq_factor` and `high_freq_factor` is blended. No code was copied. |

@@ -34,3 +34,4 @@ Confirm a gate by adding `## <YYYY-MM-DD> | HUMAN | Gate after Phase <n> passed`
 | [p1-1-tokenizer.md](p1-1-tokenizer.md) | Tokenizer, chat template, streaming detokenization |
 | [p1-2-rope.md](p1-2-rope.md) | RoPE and Llama 3 frequency scaling |
 | [p1-3-llama.md](p1-3-llama.md) | Llama forward pass, GQA, SwiGLU, contiguous KV cache |
+| [p1-4-weights.md](p1-4-weights.md) | Safetensors loading and bf16 greedy parity on Llama 3.2 1B |

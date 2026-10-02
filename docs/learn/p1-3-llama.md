@@ -10,7 +10,7 @@ The MLP is SwiGLU. One projection is passed through SiLU and multiplied by a sec
 
 The KV cache in this phase is a dense block, one slot per position up to a fixed maximum. A 6-token sequence still reserves 6 slots even after 4 tokens. Paging (Phase 3) exists to stop paying for the empty slots. The dense cache is here so the math can be checked first.
 
-Example: prefill tokens 0,1,2,3, then feed token 4 alone. The new query must see keys 0 through 4, not only key 0. On this PyTorch build, `is_causal=True` does the wrong thing when the key list is longer than the query, so decode builds an explicit mask that seats the queries at the end of the cache.
+Example: prefill tokens 0,1,2,3, then feed token 4 alone. The new query must see keys 0 through 4, not only key 0. On this PyTorch build, `is_causal=True` is wrong when the key list is longer than the query and the query is more than one token, so that case builds an explicit mask. A single new token can see every key, so it passes no mask.
 
 ## 2. Where it lives in the code
 
@@ -40,7 +40,7 @@ No benchmark. CPU float32 logits match Hugging Face within 1e-4 absolute on the 
 
 ## 5. Pitfalls hit
 
-`scaled_dot_product_attention(..., is_causal=True)` on this PyTorch, when the key sequence is longer than the query, lets query position 0 see only key position 0. Decode was attending to the first cached token and nothing else. The fix is an explicit boolean mask for that case. Prefill, where the lengths match, still uses `is_causal=True`.
+`scaled_dot_product_attention(..., is_causal=True)` on this PyTorch, when the key sequence is longer than the query, lets query position 0 see only key position 0. A query of several tokens uses an explicit boolean mask so those queries sit at the end of the cache. A single new token can see every key, so it passes no mask: an all-true mask forces the math kernel, and bf16 decode then drifts off the flash path Hugging Face uses. Prefill, where the lengths match, still uses `is_causal=True`.
 
 ## 6. Self-check questions
 
@@ -56,7 +56,7 @@ No benchmark. CPU float32 logits match Hugging Face within 1e-4 absolute on the 
 1. The cache stores KV heads, not query heads. With 4 query heads and 2 KV heads, the cache is half as big as full multi-head attention. Llama 3.1 8B is 32 query heads and 8 KV heads, so the cache is a quarter of full attention.
 2. `silu(gate(x)) * up(x)`, then `down`. The gate and the up projection are the two paths that get multiplied; down maps back to the hidden size.
 3. Each sublayer computes a change and adds it to its input. The original hidden state is still there for the next layer to read.
-4. That flag builds a mask where query 0 may only see key 0, even if five keys are present. Decode needs the single new query to see the whole cache. The explicit mask puts the query at the last key position.
+4. That flag builds a mask where query 0 may only see key 0, even if five keys are present. A single new query must see the whole cache, which is what an unmasked attention does. A longer query that is still shorter than the cache needs an explicit mask that puts the queries at the end of the keys.
 5. `lm_head.weight` is the same matrix as `embed_tokens.weight`. The model does not learn a second copy. Llama 3.2 1B is tied; the tiny fixture is not.
 
 </details>

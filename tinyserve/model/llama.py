@@ -177,13 +177,16 @@ class Attention(nn.Module):
             value = cache.v[layer_idx, :, :end].transpose(1, 2)
         key = repeat_kv(key, self.n_rep)  # [B, Nq, Sk, D]
         value = repeat_kv(value, self.n_rep)
-        # When the key sequence is longer than the query (decode), is_causal on this
-        # PyTorch lets query 0 see only key 0. The mask below aligns the queries to
-        # the end of the cache instead.
+        # is_causal on this PyTorch is upper-left aligned: a short query only sees the
+        # first keys, not the end of the cache. A single new token can see every key,
+        # so it needs no mask. Materializing an all-true mask forces the math kernel
+        # and the bf16 result drifts off the flash path Hugging Face uses for decode.
         q_len = query.shape[2]
         k_len = key.shape[2]
         if q_len == k_len:
             out = nn.functional.scaled_dot_product_attention(query, key, value, is_causal=True)
+        elif q_len == 1:
+            out = nn.functional.scaled_dot_product_attention(query, key, value, is_causal=False)
         else:
             out = nn.functional.scaled_dot_product_attention(
                 query, key, value, attn_mask=_causal_mask(q_len, k_len, query.device)

@@ -22,8 +22,8 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 ## 2. Current status
 
 - **Phase:** 1 (Correct model and naive generation)
-- **Last completed task:** P1.5 sampler
-- **In progress:** P1.6 naive engine. Dev environment is WSL2 (D-007). Llama 3.2 access is approved and `Llama-3.2-1B-Instruct` is downloaded locally. Human asked to start Phase 1 on 2026-09-29.
+- **Last completed task:** P1.6 naive engine. Phase 1 code is complete.
+- **In progress:** waiting for the human Phase 1 review gate. Do not start Phase 2 before that line is in `docs/PROGRESS.md`. Dev environment is WSL2 (D-007). Llama 3.2 access is approved and `Llama-3.2-1B-Instruct` is downloaded locally. Human asked to start Phase 1 on 2026-09-29.
 - **Working copy:** `~/TinyServe` inside WSL2 Ubuntu 24.04 (user `abhay`), opened in Cursor via the WSL remote. Do not develop in the old `D:\Projects\TinyServe` Windows copy.
 - **Review gates passed:** none yet
 - **GitHub:** https://github.com/devwo1f/TinyServe (public)
@@ -33,7 +33,7 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 | Phase | Content | Status |
 |---|---|---|
 | 0 | Skeleton, docs, env scripts, config, CI | done (human asked to start Phase 1) |
-| 1 | From-scratch Llama (RoPE w/ Llama 3 scaling, GQA, SwiGLU), safetensors loading, sampler, naive engine, HF parity | in progress (P1.5 done) |
+| 1 | From-scratch Llama (RoPE w/ Llama 3 scaling, GQA, SwiGLU), safetensors loading, sampler, naive engine, HF parity | code complete, waiting for the human review gate |
 | 2 | Benchmark + profiling harness, HF and vLLM baselines | not started |
 | 3 | Paged KV cache, block manager, KV store, reference paged attention, prefix cache | not started |
 | 4 | Continuous batching scheduler, chunked prefill, preemption, engine step loop | not started |
@@ -103,6 +103,7 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `tinyserve/config.py` | Torch-free settings. `TinyServeConfig` has sections `model` (model path, tokenizer, dtype `auto`/float32/float16/bfloat16, device, max_model_len, seed), `cache` (block_size 16, gpu_memory_utilization 0.9, memory_safety_margin_gib, num_gpu_blocks_override, enable_prefix_caching), `scheduler` (max_num_batched_tokens 2048, max_num_seqs 64, enable_chunked_prefill), `speculative` (enabled, draft_model, num_speculative_tokens, policy, batch_threshold), `server` (host, port, admission_policy fifo/reject/deadline, TTFT/TPOT SLOs), `benchmark` (workload, num_requests, request_rate, warmup, repeats, seed, ignore_eos, output_dir). API: `apply_overrides(cfg, {"cache.block_size": "32"})`, `add_config_args(parser)` adds `--section.field` flags, `config_from_args(args)`, `cfg.to_dict()` |
 | `tinyserve/engine/sequence.py` | `SamplingParams` (temperature 0 is greedy, top-k -1 is off), `SequenceStatus`, and `Sequence` with the spec Section 9 fields. |
 | `tinyserve/engine/sampler.py` | `sample_token`: temperature, then top-k, then top-p. A per-request `torch.Generator` keeps seeds from sharing the global RNG. |
+| `tinyserve/engine/engine.py` | `Engine.generate(prompts, sampling_params)` runs one request at a time on a fresh `ContiguousKVCache`. Stop ids are not emitted. `generate_tokens` is the same loop for callers who already have ids. |
 | `bench/`, `bench/microbench/` | Benchmark package (empty until Phase 2) |
 | `eval/` | Parity and perplexity evaluation (empty until Phase 1/9) |
 | `tests/fixtures/tiny_llama.json` | Tiny random Llama config in HF `config.json` format: 2 layers, hidden 64, 4 Q heads, 2 KV heads, head_dim 16, vocab 256, intermediate 128, Llama 3 `rope_scaling` |
@@ -114,8 +115,11 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `tests/unit/test_llama.py` | Tiny-model CPU float32 logits within 1e-4 of HF, tied embeddings, cache decode matches a full forward. |
 | `tests/unit/test_weights.py` | Safetensors round-trip on the tiny model, tied checkpoint with no `lm_head.weight`, and 1B config fields when the download is present. |
 | `tests/unit/test_sampler.py` | Greedy, top-k, top-p, a repeated seed that ignores the global RNG, and a two-row greedy batch. |
+| `tests/unit/test_engine.py` | One-at-a-time generation: greedy token ids match Hugging Face exactly on the tiny model, stop ids are excluded, a seed repeats. |
 | `tests/gpu/test_llama_parity.py` | (`gpu`, `slow`) Llama-3.2-1B bf16 greedy parity vs Hugging Face. Skipped when the weights are absent. |
+| `tests/gpu/test_engine_generate.py` | (`gpu`, `slow`) `Engine.generate` on one 1B prompt matches a Hugging Face argmax loop. Skipped when the weights are absent. |
 | `docs/results/phase1/2026-10-01_p1-4-greedy-parity.json` | Script-written 1B parity result. 10/10 prompts matched on the first 32 of 64 tokens; max absolute logit difference 0.0. |
+| `docs/results/phase1/2026-10-02_p1-6-naive-engine.json` | Script-written engine check: one bf16 prompt, 16 greedy tokens, matched Hugging Face. |
 | `tests/gpu/test_env_info_gpu.py` | (`gpu`) GPU fields are populated |
 
 ## 7. Environment and hardware
@@ -176,7 +180,7 @@ Full entries are in `docs/DECISIONS.md`.
 
 ## 12. Next steps
 
-1. P1.6 naive engine: `generate` one request at a time on the contiguous cache, with greedy parity against Hugging Face.
+1. Human: confirm the Phase 1 review gate in `docs/PROGRESS.md` (forward pass, GQA, RoPE scaling). Phase 2 does not start before that.
 2. Human: revoke the HF token that was pasted in chat and replace the `HF_TOKEN` line in `~/.bashrc`. Request Llama 3.1 8B access before the final benchmarks.
 
 ## 13. Change log
@@ -194,3 +198,4 @@ Full entries are in `docs/DECISIONS.md`.
 - 2026-09-29 P1.3: Llama model with contiguous KV cache; CPU float32 logits match HF within 1e-4 on the tiny model.
 - 2026-10-01 P1.4: safetensors loader; 1B bf16 greedy parity 10/10 on the first 32 tokens (result file). Single-token decode no longer passes an all-true mask into SDPA.
 - 2026-10-01 P1.5: sampler (greedy, temperature, top-k, top-p) and the Section 9 sequence types. Seeds use a per-request generator.
+- 2026-10-02 P1.6: naive engine, one request at a time on the contiguous cache. Tiny-model greedy ids match HF; 1B engine check is in the result file. Phase 1 code complete, waiting for the human review gate.

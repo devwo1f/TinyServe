@@ -22,6 +22,16 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-10-02 | Cursor | Task P1.6
+
+**Status:** done. Phase 1 code is complete. Do not start Phase 2 until the human writes the review-gate line.
+**What changed:** `tinyserve/engine/engine.py`: `Engine.generate` encodes each prompt and runs it to completion on its own contiguous cache before the next prompt. Stop ids are not emitted. Temperature 0 goes through the sampler's argmax.
+**Tests:** `tests/unit/test_engine.py`. CPU: two prompts match a Hugging Face argmax loop exactly, stop id is excluded, a seed repeats, string `generate` matches id `generate_tokens`. `tests/gpu/test_engine_generate.py`: 1 passed.
+**Results:** `docs/results/phase1/2026-10-02_p1-6-naive-engine.json` — one bf16 prompt, 16 greedy tokens, matched Hugging Face. The run was dirty (measured `6af5ab9` plus this diff).
+**Decisions:** none
+**Next step:** Human review gate for Phase 1 (forward pass, GQA, RoPE scaling). Then P2.1 datasets. Do not start Phase 2 before the gate line is in this file.
+**Questions for the human:** confirm the Phase 1 gate when you can explain the forward pass, grouped-query attention, and Llama 3 RoPE scaling without notes.
+
 ## 2026-10-01 | Cursor | Task P1.5
 
 **Status:** done

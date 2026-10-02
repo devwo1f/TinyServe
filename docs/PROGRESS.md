@@ -22,6 +22,16 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-10-01 | Cursor | Task P1.5
+
+**Status:** done
+**What changed:** `tinyserve/engine/sequence.py` holds `SamplingParams`, `SequenceStatus`, and `Sequence` (spec Section 9). `tinyserve/engine/sampler.py` draws one token: temperature 0 is argmax; otherwise temperature, top-k, then top-p, using a per-request generator.
+**Tests:** `tests/unit/test_sampler.py`. CPU: defaults, greedy, top-k, top-p, repeated seed independent of the global RNG, two-row greedy batch.
+**Results:** none
+**Decisions:** none
+**Next step:** P1.6 naive engine: `generate` one request at a time with the contiguous cache, greedy parity with Hugging Face.
+**Questions for the human:** none
+
 ## 2026-10-01 | Cursor | Task P1.4
 
 **Status:** done

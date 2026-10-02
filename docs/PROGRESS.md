@@ -22,6 +22,16 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-09-29 | Cursor | Task P1.3
+
+**Status:** done
+**What changed:** `tinyserve/model/llama.py`: RMSNorm, GQA attention, SwiGLU, contiguous KV cache, LM head with optional tied embeddings. Parameter names match Hugging Face.
+**Tests:** `tests/unit/test_llama.py`. CPU float32 on the tiny model: prefill logits within 1e-4 of HF (eager attention), tied-embedding variant the same, and prefill-plus-decode matches a single full forward.
+**Results:** none
+**Decisions:** none
+**Next step:** P1.4 load Llama-3.2-1B safetensors and run the GPU greedy parity test from spec Section 12.
+**Questions for the human:** none
+
 ## 2026-09-29 | Cursor | Task P1.2
 
 **Status:** done

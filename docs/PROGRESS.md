@@ -22,6 +22,16 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-10-01 | Cursor | Task P1.4
+
+**Status:** done
+**What changed:** `tinyserve/model/weights.py` loads safetensors onto the target device and dtype and re-ties `lm_head` when the checkpoint omits it. Single-token decode in `Attention.forward` no longer passes an all-true mask into SDPA; that mask was forcing the math kernel and bf16 tokens drifted off Hugging Face.
+**Tests:** `tests/unit/test_weights.py` (CPU round-trip, tied checkpoint, 1B config shape). `tests/gpu/test_llama_parity.py`: 1 passed. CPU suite still green.
+**Results:** `docs/results/phase1/2026-10-01_p1-4-greedy-parity.json` — 10/10 prompts matched on the first 32 of 64 greedy tokens; max absolute logit difference 0.0. The run was dirty (measured `9d09770` plus this diff).
+**Decisions:** none
+**Next step:** P1.5 sampler: greedy, temperature, top-k, top-p, per-request seeds.
+**Questions for the human:** none
+
 ## 2026-09-29 | Cursor | Task P1.3
 
 **Status:** done

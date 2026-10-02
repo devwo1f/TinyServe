@@ -1,0 +1,39 @@
+{
+  "model": "meta-llama/Llama-3.2-1B-Instruct",
+  "dtype": "bfloat16",
+  "new_tokens": 64,
+  "match_prefix": 32,
+  "prompts_matched": 10,
+  "n_prompts": 10,
+  "max_abs_logit_diff": 0.0,
+  "per_prompt_prefix_match": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+  ],
+  "env_info": {
+    "timestamp_utc": "2026-10-02T01:41:11+00:00",
+    "git_commit": "9d09770918c8ff9d9bb57ad5ee758fa1043a4297",
+    "git_dirty": true,
+    "python": "3.11.16",
+    "platform": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "cpu": "x86_64",
+    "torch": "2.14.0+cu130",
+    "torch_cuda": "13.0",
+    "cudnn": 92400,
+    "triton": "3.8.0",
+    "cuda_available": true,
+    "gpu_count": 1,
+    "gpu_name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+    "gpu_memory_gib": 8.0,
+    "gpu_compute_capability": "8.9",
+    "driver": null
+  }
+}

@@ -21,11 +21,11 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 
 ## 2. Current status
 
-- **Phase:** 1 (Correct model and naive generation)
-- **Last completed task:** P1.6 naive engine. Phase 1 code is complete.
-- **In progress:** waiting for the human Phase 1 review gate. Do not start Phase 2 before that line is in `docs/PROGRESS.md`. Dev environment is WSL2 (D-007). Llama 3.2 access is approved and `Llama-3.2-1B-Instruct` is downloaded locally. Human asked to start Phase 1 on 2026-09-29.
+- **Phase:** 2 (Benchmark and profiling harness)
+- **Last completed task:** P2.1 datasets
+- **In progress:** P2.2 offline benchmark. Dev environment is WSL2 (D-007). Llama 3.2 access is approved and `Llama-3.2-1B-Instruct` is downloaded locally. Human asked to start Phase 2 on 2026-10-02.
 - **Working copy:** `~/TinyServe` inside WSL2 Ubuntu 24.04 (user `abhay`), opened in Cursor via the WSL remote. Do not develop in the old `D:\Projects\TinyServe` Windows copy.
-- **Review gates passed:** none yet
+- **Review gates passed:** Phase 0 and Phase 1 (human asked to start the next phase)
 - **GitHub:** https://github.com/devwo1f/TinyServe (public)
 
 ## 3. Phase roadmap
@@ -33,8 +33,8 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 | Phase | Content | Status |
 |---|---|---|
 | 0 | Skeleton, docs, env scripts, config, CI | done (human asked to start Phase 1) |
-| 1 | From-scratch Llama (RoPE w/ Llama 3 scaling, GQA, SwiGLU), safetensors loading, sampler, naive engine, HF parity | code complete, waiting for the human review gate |
-| 2 | Benchmark + profiling harness, HF and vLLM baselines | not started |
+| 1 | From-scratch Llama (RoPE w/ Llama 3 scaling, GQA, SwiGLU), safetensors loading, sampler, naive engine, HF parity | done (human asked to start Phase 2) |
+| 2 | Benchmark + profiling harness, HF and vLLM baselines | in progress (P2.1 done) |
 | 3 | Paged KV cache, block manager, KV store, reference paged attention, prefix cache | not started |
 | 4 | Continuous batching scheduler, chunked prefill, preemption, engine step loop | not started |
 | 5 | Triton kernels: fused add+RMSNorm, RoPE, paged decode attention (split-K and prefill are stretch) | not started |
@@ -91,7 +91,7 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `pyproject.toml` | uv project (Python 3.11 only). Base deps: `numpy`, `transformers==5.17.0` (tokenizer and HF reference). Torch `2.14.0` via mutually exclusive extras `cu130` (GPU) / `cpu` (CI) from the official PyTorch indexes. Dev group `pytest` + `ruff`. Pytest markers `gpu`/`slow` (`--strict-markers`), `pythonpath = ["."]`. Ruff: Python files only, line length 100 |
 | `scripts/env_info.py` | `collect_env_info() -> dict` with fixed `FIELDS` (timestamp, git commit/dirty, python, platform, cpu, torch, torch_cuda, cudnn, triton, cuda_available, gpu_count/name/memory/compute capability, driver). Missing items are None. `--json` flag. Embedded in every result file |
 | `scripts/download_models.sh` | `bash scripts/download_models.sh [dev / dev-spec / final / <repo ids>]` into `models/<name>`. Requires `HF_TOKEN` in the environment (not passed on the command line). One `--include` flag per glob, or the CLI treats extras as filenames and skips the weights. Excludes `original/` (duplicate .pth). Dev model is already at `models/Llama-3.2-1B-Instruct` (safetensors, not committed) |
-| `scripts/download_datasets.sh` | `bash scripts/download_datasets.sh [sharegpt wikitext humaneval]` into `data/` (raw files; filtering happens in `bench/datasets.py`) |
+| `scripts/download_datasets.sh` | `bash scripts/download_datasets.sh [sharegpt wikitext humaneval]` into `data/` (raw files; filtering happens in `bench/datasets.py`). HumanEval is the official JSONL, not the Hugging Face parquet (D-009). |
 | `uv.lock`, `.python-version` | Locked dependency set; Python pin `3.11` |
 | `README.md` | Short public README with CI badge (no numbers until result files exist) |
 | `.github/workflows/ci.yml` | CI on push to main and PRs: ubuntu, `uv sync --locked --extra cpu`, env_info, ruff check, ruff format --check, `pytest -m "not gpu"` |
@@ -104,7 +104,8 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `tinyserve/engine/sequence.py` | `SamplingParams` (temperature 0 is greedy, top-k -1 is off), `SequenceStatus`, and `Sequence` with the spec Section 9 fields. |
 | `tinyserve/engine/sampler.py` | `sample_token`: temperature, then top-k, then top-p. A per-request `torch.Generator` keeps seeds from sharing the global RNG. |
 | `tinyserve/engine/engine.py` | `Engine.generate(prompts, sampling_params)` runs one request at a time on a fresh `ContiguousKVCache`. Stop ids are not emitted. `generate_tokens` is the same loop for callers who already have ids. |
-| `bench/`, `bench/microbench/` | Benchmark package (empty until Phase 2) |
+| `bench/datasets.py` | ShareGPT, code (JSON/JSONL), shared-prefix, and synthetic workloads. Length filter, then a hash-ordered subset for a fixed seed. `prompt_token_ids` is what a benchmark must send. |
+| `bench/microbench/` | Kernel microbenchmarks (empty until Phase 5) |
 | `eval/` | Parity and perplexity evaluation (empty until Phase 1/9) |
 | `tests/fixtures/tiny_llama.json` | Tiny random Llama config in HF `config.json` format: 2 layers, hidden 64, 4 Q heads, 2 KV heads, head_dim 16, vocab 256, intermediate 128, Llama 3 `rope_scaling` |
 | `tests/unit/test_skeleton.py` | Smoke tests: package imports, fixture matches spec Section 6 |
@@ -116,6 +117,7 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `tests/unit/test_weights.py` | Safetensors round-trip on the tiny model, tied checkpoint with no `lm_head.weight`, and 1B config fields when the download is present. |
 | `tests/unit/test_sampler.py` | Greedy, top-k, top-p, a repeated seed that ignores the global RNG, and a two-row greedy batch. |
 | `tests/unit/test_engine.py` | One-at-a-time generation: greedy token ids match Hugging Face exactly on the tiny model, stop ids are excluded, a seed repeats. |
+| `tests/unit/test_datasets.py` | Length filtering and fixed-seed subsets for all four workloads, using in-test fixtures. |
 | `tests/gpu/test_llama_parity.py` | (`gpu`, `slow`) Llama-3.2-1B bf16 greedy parity vs Hugging Face. Skipped when the weights are absent. |
 | `tests/gpu/test_engine_generate.py` | (`gpu`, `slow`) `Engine.generate` on one 1B prompt matches a Hugging Face argmax loop. Skipped when the weights are absent. |
 | `docs/results/phase1/2026-10-01_p1-4-greedy-parity.json` | Script-written 1B parity result. 10/10 prompts matched on the first 32 of 64 tokens; max absolute logit difference 0.0. |
@@ -169,6 +171,7 @@ Full entries are in `docs/DECISIONS.md`.
 - D-005: `scripts/` is an importable package (bench code embeds `collect_env_info()`).
 - D-006: config is torch-free dataclasses with dotted overrides; `dtype="auto"` is resolved by model code in Phase 1.
 - D-008: `transformers==5.17.0` for the tokenizer and the Hugging Face numerical reference.
+- D-009: HumanEval is the official JSONL release, not the Hugging Face parquet, so the dataset loader stays dependency-free.
 - D-007: develop in WSL2 Ubuntu 24.04 at `~/TinyServe` (resolves Q-001).
 - Repo is public on GitHub (human choice). Phase 0 was reviewed by starting Phase 1.
 
@@ -180,7 +183,7 @@ Full entries are in `docs/DECISIONS.md`.
 
 ## 12. Next steps
 
-1. Human: confirm the Phase 1 review gate in `docs/PROGRESS.md` (forward pass, GQA, RoPE scaling). Phase 2 does not start before that.
+1. P2.2 offline benchmark: run a fixed request set through `Engine.generate` / `generate_tokens` and write a Section 11 JSONL result.
 2. Human: revoke the HF token that was pasted in chat and replace the `HF_TOKEN` line in `~/.bashrc`. Request Llama 3.1 8B access before the final benchmarks.
 
 ## 13. Change log
@@ -199,3 +202,4 @@ Full entries are in `docs/DECISIONS.md`.
 - 2026-10-01 P1.4: safetensors loader; 1B bf16 greedy parity 10/10 on the first 32 tokens (result file). Single-token decode no longer passes an all-true mask into SDPA.
 - 2026-10-01 P1.5: sampler (greedy, temperature, top-k, top-p) and the Section 9 sequence types. Seeds use a per-request generator.
 - 2026-10-02 P1.6: naive engine, one request at a time on the contiguous cache. Tiny-model greedy ids match HF; 1B engine check is in the result file. Phase 1 code complete, waiting for the human review gate.
+- 2026-10-02 P2.1: workload loader (ShareGPT, code, shared prefix, synthetic) with length filters and a hash-ordered seed. Human asked to start Phase 2. HumanEval download is official JSONL (D-009).

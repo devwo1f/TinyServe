@@ -37,3 +37,4 @@ Confirm a gate by adding `## <YYYY-MM-DD> | HUMAN | Gate after Phase <n> passed`
 | [p1-4-weights.md](p1-4-weights.md) | Safetensors loading and bf16 greedy parity on Llama 3.2 1B |
 | [p1-5-sampler.md](p1-5-sampler.md) | Greedy, temperature, top-k, top-p, per-request seeds |
 | [p1-6-naive-engine.md](p1-6-naive-engine.md) | One-request generation on the contiguous cache |
+| [p2-1-datasets.md](p2-1-datasets.md) | ShareGPT, code, shared-prefix, and synthetic workloads |

@@ -3,7 +3,7 @@
 #
 #   ShareGPT (V3 unfiltered cleaned split)  -> data/sharegpt/   serving workloads
 #   WikiText-2 raw (test split)             -> data/wikitext/   perplexity (Phase 9)
-#   HumanEval prompts                       -> data/humaneval/  code workload
+#   HumanEval prompts (official JSONL, not the HF parquet) -> data/humaneval/  code workload
 #
 # Filtering and fixed-seed subsetting happen in bench/datasets.py, not here, so the raw files
 # stay exactly as published.
@@ -39,7 +39,14 @@ for t in "${targets[@]}"; do
       hf_dataset Salesforce/wikitext "${DATA_DIR}/wikitext" \
         --include "wikitext-2-raw-v1/*" ;;
     humaneval)
-      hf_dataset openai/openai_humaneval "${DATA_DIR}/humaneval" ;;
+      # The Hugging Face copy is parquet (D-009). The official release is JSONL,
+      # which bench/datasets.py reads without an extra dependency.
+      dest="${DATA_DIR}/humaneval"
+      mkdir -p "${dest}"
+      echo "==> openai/human-eval JSONL -> ${dest}"
+      curl -fsSL -o "${dest}/HumanEval.jsonl.gz" \
+        https://raw.githubusercontent.com/openai/human-eval/master/data/HumanEval.jsonl.gz
+      gzip -dc "${dest}/HumanEval.jsonl.gz" > "${dest}/humaneval.jsonl" ;;
     *)
       echo "error: unknown dataset '${t}' (expected sharegpt, wikitext, humaneval)" >&2
       exit 1 ;;

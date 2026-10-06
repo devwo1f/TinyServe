@@ -22,6 +22,20 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-10-02 | HUMAN (via session) | Gate after Phase 1 passed
+
+Human asked to start Phase 2.
+
+## 2026-10-02 | Cursor | Task P2.1
+
+**Status:** done
+**What changed:** `bench/datasets.py` turns ShareGPT, code JSON/JSONL, a shared token prefix, and synthetic ids into `Sample`s. Prompts and answers over 1024 tokens are dropped (the caps are arguments). A seed picks a hash-ordered subset. `scripts/download_datasets.sh` fetches official HumanEval JSONL (D-009).
+**Tests:** `tests/unit/test_datasets.py`. CPU: length filter, first-turn-only ShareGPT, stable subset, JSON and JSONL code rows, shared prefix ids, synthetic lengths and seed. 8 passed.
+**Results:** none
+**Decisions:** D-009
+**Next step:** P2.2 offline benchmark through `Engine.generate_tokens`, writing a Section 11 JSONL result.
+**Questions for the human:** none
+
 ## 2026-10-02 | Cursor | Task P1.6
 
 **Status:** done. Phase 1 code is complete. Do not start Phase 2 until the human writes the review-gate line.

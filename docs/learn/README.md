@@ -40,3 +40,4 @@ Confirm a gate by adding `## <YYYY-MM-DD> | HUMAN | Gate after Phase <n> passed`
 | [p2-1-datasets.md](p2-1-datasets.md) | ShareGPT, code, shared-prefix, and synthetic workloads |
 | [p2-2-offline.md](p2-2-offline.md) | Offline throughput and the Section 11 result file |
 | [p2-3-baselines.md](p2-3-baselines.md) | Naive TinyServe and Hugging Face generate baselines, and where the time goes |
+| [p2-4-vllm.md](p2-4-vllm.md) | vLLM offline baseline and why its token rate is not a kernel-only comparison |

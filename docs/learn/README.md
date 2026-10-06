@@ -38,3 +38,4 @@ Confirm a gate by adding `## <YYYY-MM-DD> | HUMAN | Gate after Phase <n> passed`
 | [p1-5-sampler.md](p1-5-sampler.md) | Greedy, temperature, top-k, top-p, per-request seeds |
 | [p1-6-naive-engine.md](p1-6-naive-engine.md) | One-request generation on the contiguous cache |
 | [p2-1-datasets.md](p2-1-datasets.md) | ShareGPT, code, shared-prefix, and synthetic workloads |
+| [p2-2-offline.md](p2-2-offline.md) | Offline throughput and the Section 11 result file |

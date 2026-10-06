@@ -86,6 +86,10 @@ def test_greedy_tokens_match_hf_one_prompt_at_a_time():
         assert result.output_token_ids == _greedy_hf(hf, prompt, params.max_tokens)
         assert result.num_computed_tokens == len(prompt) + len(result.output_token_ids)
         assert result.prompt_token_ids == prompt
+        assert result.ttft_s is not None
+        assert result.ttft_s <= result.e2e_s
+        assert result.itl_s is not None
+        assert len(result.itl_s) == len(result.output_token_ids) - 1
 
 
 def test_stop_token_is_not_emitted():

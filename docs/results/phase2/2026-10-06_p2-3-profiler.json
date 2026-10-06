@@ -1,0 +1,227 @@
+{
+  "record": "profile",
+  "config": {
+    "model": "meta-llama/Llama-3.2-1B-Instruct",
+    "model_dir": "models/Llama-3.2-1B-Instruct",
+    "dtype": "bfloat16",
+    "workload": "synthetic",
+    "num_requests": 8,
+    "input_len": 64,
+    "output_len": 32,
+    "num_warmup_requests": 2,
+    "num_repeats": 3,
+    "seed": 0,
+    "ignore_eos": true,
+    "request_rate": "inf",
+    "engine": "tinyserve"
+  },
+  "env_info": {
+    "timestamp_utc": "2026-10-06T19:31:49+00:00",
+    "git_commit": "76ea9ec8cc9d3a2f150ba043b99d1ee668f66a5c",
+    "git_dirty": true,
+    "python": "3.11.16",
+    "platform": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "cpu": "x86_64",
+    "torch": "2.14.0+cu130",
+    "torch_cuda": "13.0",
+    "cudnn": 92400,
+    "triton": "3.8.0",
+    "cuda_available": true,
+    "gpu_count": 1,
+    "gpu_name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+    "gpu_memory_gib": 8.0,
+    "gpu_compute_capability": "8.9",
+    "driver": null
+  },
+  "git_commit": "76ea9ec8cc9d3a2f150ba043b99d1ee668f66a5c",
+  "profile": {
+    "activities": [
+      "CPU",
+      "CUDA"
+    ],
+    "sort_by": "self_device_time_total",
+    "time_key": "self_device_time_total_us",
+    "prompt_len": 64,
+    "output_len": 32,
+    "top_self_time": [
+      {
+        "name": "aten::mm",
+        "count": 3729,
+        "self_cpu_time_total_us": 77763.35599999655,
+        "cpu_time_total_us": 139232.10999999696,
+        "self_device_time_total_us": 336676.7910000027,
+        "device_time_total_us": 336676.7910000027
+      },
+      {
+        "name": "std::enable_if<!(false), void>::type internal::gemvx::kernel<int, int, __nv_bfloat16, __nv_bfloat16, __nv_bfloat16, float, false, true, true, false, 6, false, cublasGemvParamsEx<int, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16>, float> >(cublasGemvParamsEx<int, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16>, float>)",
+        "count": 2080,
+        "self_cpu_time_total_us": 0.0,
+        "cpu_time_total_us": 0.0,
+        "self_device_time_total_us": 243406.62100000138,
+        "device_time_total_us": 243406.62100000138
+      },
+      {
+        "name": "std::enable_if<!(false), void>::type internal::gemvx::kernel<int, int, __nv_bfloat16, __nv_bfloat16, __nv_bfloat16, float, false, true, true, false, 7, false, cublasGemvParamsEx<int, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16>, float> >(cublasGemvParamsEx<int, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16>, float>)",
+        "count": 1536,
+        "self_cpu_time_total_us": 0.0,
+        "cpu_time_total_us": 0.0,
+        "self_device_time_total_us": 82022.38200000131,
+        "device_time_total_us": 82022.38200000131
+      },
+      {
+        "name": "aten::copy_",
+        "count": 4455,
+        "self_cpu_time_total_us": 34695.06099999843,
+        "cpu_time_total_us": 104033.32399999796,
+        "self_device_time_total_us": 7239.449000000797,
+        "device_time_total_us": 7239.449000000797
+      },
+      {
+        "name": "aten::mul",
+        "count": 4851,
+        "self_cpu_time_total_us": 52206.15999999953,
+        "cpu_time_total_us": 107428.37800000061,
+        "self_device_time_total_us": 6558.721999997568,
+        "device_time_total_us": 6558.721999997568
+      },
+      {
+        "name": "ampere_bf16_s16816gemm_bf16_128x64_ldg8_f2f_stages_32x6_tn",
+        "count": 64,
+        "self_cpu_time_total_us": 0.0,
+        "cpu_time_total_us": 0.0,
+        "self_device_time_total_us": 6155.715999999998,
+        "device_time_total_us": 6155.715999999998
+      },
+      {
+        "name": "aten::_flash_attention_forward",
+        "count": 528,
+        "self_cpu_time_total_us": 10621.61299999431,
+        "cpu_time_total_us": 31502.290999999877,
+        "self_device_time_total_us": 5408.777999998389,
+        "device_time_total_us": 5408.777999998389
+      },
+      {
+        "name": "void pytorch_flash::flash_fwd_kernel<Flash_fwd_kernel_traits<64, 128, 128, 4, false, false, cutlass::bfloat16_t, Flash_kernel_traits<64, 128, 128, 4, cutlass::bfloat16_t> >, false, false, false, false, false, true, false, false>(pytorch_flash::Flash_fwd_params)",
+        "count": 512,
+        "self_cpu_time_total_us": 0.0,
+        "cpu_time_total_us": 0.0,
+        "self_device_time_total_us": 5233.2879999983925,
+        "device_time_total_us": 5233.2879999983925
+      },
+      {
+        "name": "void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_impl_nocast<at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1})",
+        "count": 2145,
+        "self_cpu_time_total_us": 0.0,
+        "cpu_time_total_us": 0.0,
+        "self_device_time_total_us": 3541.6230000000005,
+        "device_time_total_us": 3541.6230000000005
+      },
+      {
+        "name": "aten::add",
+        "count": 3201,
+        "self_cpu_time_total_us": 33462.9499999978,
+        "cpu_time_total_us": 71668.3889999974,
+        "self_device_time_total_us": 3113.4500000000844,
+        "device_time_total_us": 3113.4500000000844
+      },
+      {
+        "name": "void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#12}::operator()() const::{lambda(c10::BFloat16)#1}>(at::TensorIteratorBase&, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#12}::operator()() const::{lambda(c10::BFloat16)#1} const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#12}::operator()() const::{lambda(c10::BFloat16)#1}>(at::TensorIteratorBase&, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#12}::operator()() const::{lambda(c10::BFloat16)#1} const&)::{lambda(int)#1})",
+        "count": 1056,
+        "self_cpu_time_total_us": 0.0,
+        "cpu_time_total_us": 0.0,
+        "self_device_time_total_us": 2999.510000000646,
+        "device_time_total_us": 2999.510000000646
+      },
+      {
+        "name": "aten::mean",
+        "count": 1089,
+        "self_cpu_time_total_us": 16658.871999999974,
+        "cpu_time_total_us": 29565.01500000025,
+        "self_device_time_total_us": 2462.872000000427,
+        "device_time_total_us": 2462.872000000427
+      },
+      {
+        "name": "void at::native::reduce_kernel<512, 1, at::native::ReduceOp<float, at::native::MeanOps<float, float, float, float>, unsigned int, float, 4, 4> >(at::native::ReduceOp<float, at::native::MeanOps<float, float, float, float>, unsigned int, float, 4, 4>)",
+        "count": 1089,
+        "self_cpu_time_total_us": 0.0,
+        "cpu_time_total_us": 0.0,
+        "self_device_time_total_us": 2462.872000000427,
+        "device_time_total_us": 2462.872000000427
+      },
+      {
+        "name": "void cutlass::Kernel2<cutlass_80_tensorop_s16816gemm_bf16_256x64_32x4_tn_align8>(cutlass_80_tensorop_s16816gemm_bf16_256x64_32x4_tn_align8::Params)",
+        "count": 16,
+        "self_cpu_time_total_us": 0.0,
+        "cpu_time_total_us": 0.0,
+        "self_device_time_total_us": 2391.9000000000033,
+        "device_time_total_us": 2391.9000000000033
+      },
+      {
+        "name": "void cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_256x64_32x4_tn_align8>(cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_256x64_32x4_tn_align8::Params)",
+        "count": 1,
+        "self_cpu_time_total_us": 0.0,
+        "cpu_time_total_us": 0.0,
+        "self_device_time_total_us": 2226.625,
+        "device_time_total_us": 2226.625
+      },
+      {
+        "name": "void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, 4, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1> >(int, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1>)",
+        "count": 1122,
+        "self_cpu_time_total_us": 0.0,
+        "cpu_time_total_us": 0.0,
+        "self_device_time_total_us": 2169.159999998962,
+        "device_time_total_us": 2169.159999998962
+      },
+      {
+        "name": "aten::cat",
+        "count": 1089,
+        "self_cpu_time_total_us": 14504.903999998212,
+        "cpu_time_total_us": 28035.644999999513,
+        "self_device_time_total_us": 2080.5469999992583,
+        "device_time_total_us": 2080.5469999992583
+      },
+      {
+        "name": "void at::native::vectorized_elementwise_kernel<4, at::native::CUDAFunctor_add<c10::BFloat16>, std::array<char*, 3ul>, false>(int, at::native::CUDAFunctor_add<c10::BFloat16>, std::array<char*, 3ul>)",
+        "count": 2080,
+        "self_cpu_time_total_us": 0.0,
+        "cpu_time_total_us": 0.0,
+        "self_device_time_total_us": 2043.7850000020608,
+        "device_time_total_us": 2043.7850000020608
+      },
+      {
+        "name": "void at::native::(anonymous namespace)::CatArrayBatchedCopy<at::native::(anonymous namespace)::OpaqueType<2u>, unsigned int, 4, 64, 64>(at::native::(anonymous namespace)::OpaqueType<2u>*, at::native::(anonymous namespace)::CatArrInputTensorMetadata<at::native::(anonymous namespace)::OpaqueType<2u>, unsigned int, 64, 64>, at::native::(anonymous namespace)::TensorSizeStride<unsigned int, 4u>, int, unsigned int)",
+        "count": 1056,
+        "self_cpu_time_total_us": 0.0,
+        "cpu_time_total_us": 0.0,
+        "self_device_time_total_us": 2035.6029999993107,
+        "device_time_total_us": 2035.6029999993107
+      },
+      {
+        "name": "aten::neg",
+        "count": 1056,
+        "self_cpu_time_total_us": 11913.31200000149,
+        "cpu_time_total_us": 25517.50200000157,
+        "self_device_time_total_us": 1591.0179999997235,
+        "device_time_total_us": 1591.0179999997235
+      }
+    ],
+    "groups": {
+      "time_key": "self_device_time_total_us",
+      "us": {
+        "attention": 5408.777999998389,
+        "gemm": 336676.7910000027,
+        "norm": 0.0,
+        "elementwise": 17605.154999999875,
+        "other": 9197.849000001652
+      },
+      "fraction": {
+        "attention": 0.01466236255574756,
+        "gemm": 0.9126788294415407,
+        "norm": 0.0,
+        "elementwise": 0.04772485863908761,
+        "other": 0.024933949363624194
+      }
+    },
+    "table": "-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  \n                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls  \n-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  \n                                               aten::mm         8.98%      77.763ms        16.08%     139.232ms      37.338us     336.677ms        91.27%     336.677ms      90.286us          3729  \nstd::enable_if<!(false), void>::type internal::gemvx...         0.00%       0.000us         0.00%       0.000us       0.000us     243.407ms        65.98%     243.407ms     117.022us          2080  \nstd::enable_if<!(false), void>::type internal::gemvx...         0.00%       0.000us         0.00%       0.000us       0.000us      82.022ms        22.24%      82.022ms      53.400us          1536  \n                                            aten::copy_         4.01%      34.695ms        12.02%     104.033ms      23.352us       7.239ms         1.96%       7.239ms       1.625us          4455  \n                                              aten::mul         6.03%      52.206ms        12.41%     107.428ms      22.146us       6.559ms         1.78%       6.559ms       1.352us          4851  \nampere_bf16_s16816gemm_bf16_128x64_ldg8_f2f_stages_3...         0.00%       0.000us         0.00%       0.000us       0.000us       6.156ms         1.67%       6.156ms      96.183us            64  \n                         aten::_flash_attention_forward         1.23%      10.622ms         3.64%      31.502ms      59.663us       5.409ms         1.47%       5.409ms      10.244us           528  \nvoid pytorch_flash::flash_fwd_kernel<Flash_fwd_kerne...         0.00%       0.000us         0.00%       0.000us       0.000us       5.233ms         1.42%       5.233ms      10.221us           512  \nvoid at::native::elementwise_kernel<128, 4, at::nati...         0.00%       0.000us         0.00%       0.000us       0.000us       3.542ms         0.96%       3.542ms       1.651us          2145  \n                                              aten::add         3.86%      33.463ms         8.28%      71.668ms      22.389us       3.113ms         0.84%       3.113ms       0.973us          3201  \nvoid at::native::elementwise_kernel<128, 4, at::nati...         0.00%       0.000us         0.00%       0.000us       0.000us       3.000ms         0.81%       3.000ms       2.840us          1056  \n                                             aten::mean         1.92%      16.659ms         3.41%      29.565ms      27.149us       2.463ms         0.67%       2.463ms       2.262us          1089  \nvoid at::native::reduce_kernel<512, 1, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us       2.463ms         0.67%       2.463ms       2.262us          1089  \nvoid cutlass::Kernel2<cutlass_80_tensorop_s16816gemm...         0.00%       0.000us         0.00%       0.000us       0.000us       2.392ms         0.65%       2.392ms     149.494us            16  \nvoid cutlass::Kernel2<cutlass_80_tensorop_bf16_s1681...         0.00%       0.000us         0.00%       0.000us       0.000us       2.227ms         0.60%       2.227ms       2.227ms             1  \nvoid at::native::unrolled_elementwise_kernel<at::nat...         0.00%       0.000us         0.00%       0.000us       0.000us       2.169ms         0.59%       2.169ms       1.933us          1122  \n                                              aten::cat         1.68%      14.505ms         3.24%      28.036ms      25.744us       2.081ms         0.56%       2.081ms       1.911us          1089  \nvoid at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us       2.044ms         0.55%       2.044ms       0.983us          2080  \nvoid at::native::(anonymous namespace)::CatArrayBatc...         0.00%       0.000us         0.00%       0.000us       0.000us       2.036ms         0.55%       2.036ms       1.928us          1056  \n                                              aten::neg         1.38%      11.913ms         2.95%      25.518ms      24.164us       1.591ms         0.43%       1.591ms       1.507us          1056  \n-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  \nSelf CPU time total: 865.858ms\nSelf CUDA time total: 368.889ms\n"
+  }
+}

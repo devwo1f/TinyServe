@@ -66,38 +66,78 @@ def run_offline(
         measured: list[dict] = []
         for index, sample in enumerate(samples):
             result = _generate_one(engine, sample, ignore_eos=ignore_eos, eos_token_id=eos_token_id)
-            n_out = len(result.output_token_ids)
-            itl = list(result.itl_s or [])
-            tpot = _tpot(result.e2e_s, result.ttft_s, n_out)
             measured.append(
-                {
-                    "record": "request",
-                    "repeat": repeat,
-                    "index": index,
-                    "workload": sample.workload,
-                    "prompt_len": len(sample.prompt_token_ids),
-                    "num_output_tokens": n_out,
-                    "ttft_s": result.ttft_s,
-                    "e2e_s": result.e2e_s,
-                    "tpot_s": tpot,
-                    "itl_s": itl,
-                }
+                request_record(
+                    repeat,
+                    index,
+                    sample,
+                    num_output_tokens=len(result.output_token_ids),
+                    ttft_s=result.ttft_s,
+                    e2e_s=result.e2e_s,
+                    itl_s=list(result.itl_s or []),
+                )
             )
         wall_s = _wall_end(device, wall_start)
-        output_tokens = sum(row["num_output_tokens"] for row in measured)
-        prompt_tokens = sum(row["prompt_len"] for row in measured)
-        repeat_rows.append(
-            {
-                "repeat": repeat,
-                "wall_clock_s": wall_s,
-                "output_tokens": output_tokens,
-                "prompt_tokens": prompt_tokens,
-                "output_throughput": output_tokens / wall_s,
-                "total_throughput": (output_tokens + prompt_tokens) / wall_s,
-            }
-        )
+        repeat_rows.append(repeat_record(repeat, measured, wall_s))
         request_rows.extend(measured)
 
+    return write_benchmark_jsonl(
+        output_path,
+        config=config,
+        request_rows=request_rows,
+        repeat_rows=repeat_rows,
+        num_warmup_requests=num_warmup_requests,
+    )
+
+
+def request_record(
+    repeat: int,
+    index: int,
+    sample: Sample,
+    *,
+    num_output_tokens: int,
+    ttft_s: float | None,
+    e2e_s: float,
+    itl_s: list[float],
+) -> dict:
+    """One measured request, in the Section 11 row shape both baselines share."""
+    return {
+        "record": "request",
+        "repeat": repeat,
+        "index": index,
+        "workload": sample.workload,
+        "prompt_len": len(sample.prompt_token_ids),
+        "num_output_tokens": num_output_tokens,
+        "ttft_s": ttft_s,
+        "e2e_s": e2e_s,
+        "tpot_s": _tpot(e2e_s, ttft_s, num_output_tokens),
+        "itl_s": itl_s,
+    }
+
+
+def repeat_record(repeat: int, measured: list[dict], wall_s: float) -> dict:
+    """Throughput for one repeat. The wall clock is the measured pass only."""
+    output_tokens = sum(row["num_output_tokens"] for row in measured)
+    prompt_tokens = sum(row["prompt_len"] for row in measured)
+    return {
+        "repeat": repeat,
+        "wall_clock_s": wall_s,
+        "output_tokens": output_tokens,
+        "prompt_tokens": prompt_tokens,
+        "output_throughput": output_tokens / wall_s,
+        "total_throughput": (output_tokens + prompt_tokens) / wall_s,
+    }
+
+
+def write_benchmark_jsonl(
+    output_path: str | Path,
+    *,
+    config: dict,
+    request_rows: list[dict],
+    repeat_rows: list[dict],
+    num_warmup_requests: int,
+) -> dict:
+    """Write meta, request, and summary lines. Returns the summary object."""
     summary = _summary(repeat_rows, request_rows, num_warmup_requests)
     env = collect_env_info()
     meta = {

@@ -22,6 +22,16 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-10-06 | Cursor | Task P2.3
+
+**Status:** done
+**What changed:** `bench/baselines.py` runs the same synthetic requests through naive TinyServe and Hugging Face `generate`, one model at a time, and writes Section 11 JSONL. A third file is a `torch.profiler` table for one TinyServe request. `generate` is greedy with `min_new_tokens` equal to `max_new_tokens`, so both sides emit the dataset length.
+**Tests:** `tests/unit/test_baselines.py`. CPU: tiny-model `generate` JSONL matches the shared row shape; the profiler summary is JSON and has the aten buckets. GPU: the 1B script wrote the three result files below.
+**Results:** `docs/results/phase2/2026-10-06_p2-3-tinyserve-offline.jsonl`, `docs/results/phase2/2026-10-06_p2-3-hf-generate.jsonl`, `docs/results/phase2/2026-10-06_p2-3-profiler.json`. The run was dirty (measured `76ea9ec` plus this diff).
+**Decisions:** none
+**Next step:** P2.4 vLLM baseline in a separate venv, with `bench/vllm_baseline.md` and an offline result on the dev model.
+**Questions for the human:** none
+
 ## 2026-10-06 | Cursor | Task P2.2
 
 **Status:** done

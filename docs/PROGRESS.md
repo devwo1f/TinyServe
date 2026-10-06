@@ -22,6 +22,20 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-10-06 | Cursor | Task P3.1
+
+**Status:** done
+**What changed:** `tinyserve/kv/cache.py` allocates paged K and V and computes how many blocks fit. The budget is total GPU memory times utilization, minus weight bytes, the profiled activation peak, and `memory_safety_margin_gib`. Tied embeddings are counted once. `num_gpu_blocks_override` skips the budget. `str(CacheProfile)` is the startup line (block count and token capacity). The naive engine still uses the contiguous cache.
+**Tests:** `tests/unit/test_kv_cache.py`. CPU: the spec's 8B token is 131072 bytes (8192 tokens per GiB), a fake budget floors to 90 blocks / 1440 tokens, a short budget is 0 blocks, an override ignores the budget, tied weights are not double-counted, layer views match the spec shape, and a CPU build with a fake activation size allocates that many blocks. 9 passed.
+**Results:** none
+**Decisions:** none
+**Next step:** P3.2 block manager: allocate, free, reference counts, and truncate, with tests for exhaustion, exact block boundaries, and truncate.
+**Questions for the human:** none
+
+## 2026-10-06 | HUMAN (via session) | Gate after Phase 2 passed
+
+Human asked to start Phase 3.
+
 ## 2026-10-06 | Cursor | Task P2.5
 
 **Status:** done

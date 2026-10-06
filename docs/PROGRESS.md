@@ -22,6 +22,16 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-10-06 | Cursor | Task P2.4
+
+**Status:** done
+**What changed:** vLLM 0.31.0+cu129 is installed in `/home/abhay/venvs/tinyserve-vllm` (not the project venv). `bench/vllm_offline.py` runs the P2.3 synthetic set as one batched `generate` per repeat and writes a Section 11 JSONL. `bench/vllm_baseline.md` records the install, the versions, and the command. FlashInfer's sampler is turned off because it JIT-compiles with `nvcc`, which this machine does not have. torchcodec is pinned to 0.14.0 so the import does not ask for `libnvrtc.so.13`.
+**Tests:** `tests/unit/test_vllm_offline.py`. CPU: latency math and fixed output lengths, without importing vLLM. GPU: the script wrote the result file below.
+**Results:** `docs/results/phase2/2026-10-06_p2-4-vllm-offline.jsonl`. The run was dirty (measured `b3784af` plus this diff). ITL percentiles are null; vLLM's request stats do not include each gap.
+**Decisions:** none
+**Next step:** P2.5 profiling scripts: `scripts/profile_nsys.sh` and `scripts/profile_ncu.sh`, and a learning note from a run on the naive engine.
+**Questions for the human:** none
+
 ## 2026-10-06 | Cursor | Task P2.3
 
 **Status:** done

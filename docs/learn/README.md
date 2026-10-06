@@ -39,3 +39,4 @@ Confirm a gate by adding `## <YYYY-MM-DD> | HUMAN | Gate after Phase <n> passed`
 | [p1-6-naive-engine.md](p1-6-naive-engine.md) | One-request generation on the contiguous cache |
 | [p2-1-datasets.md](p2-1-datasets.md) | ShareGPT, code, shared-prefix, and synthetic workloads |
 | [p2-2-offline.md](p2-2-offline.md) | Offline throughput and the Section 11 result file |
+| [p2-3-baselines.md](p2-3-baselines.md) | Naive TinyServe and Hugging Face generate baselines, and where the time goes |

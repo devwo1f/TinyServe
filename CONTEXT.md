@@ -22,8 +22,8 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 ## 2. Current status
 
 - **Phase:** 2 (Benchmark and profiling harness)
-- **Last completed task:** P2.2 offline benchmark
-- **In progress:** P2.3 baselines (naive TinyServe and Hugging Face `generate` on the dev model). Dev environment is WSL2 (D-007). Llama 3.2 access is approved and `Llama-3.2-1B-Instruct` is downloaded locally. Human asked to start Phase 2 on 2026-10-02.
+- **Last completed task:** P2.3 baselines
+- **In progress:** P2.4 vLLM baseline (separate venv, exact commands, offline result). Dev environment is WSL2 (D-007). Llama 3.2 access is approved and `Llama-3.2-1B-Instruct` is downloaded locally. Human asked to start Phase 2 on 2026-10-02.
 - **Working copy:** `~/TinyServe` inside WSL2 Ubuntu 24.04 (user `abhay`), opened in Cursor via the WSL remote. Do not develop in the old `D:\Projects\TinyServe` Windows copy.
 - **Review gates passed:** Phase 0 and Phase 1 (human asked to start the next phase)
 - **GitHub:** https://github.com/devwo1f/TinyServe (public)
@@ -34,7 +34,7 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 |---|---|---|
 | 0 | Skeleton, docs, env scripts, config, CI | done (human asked to start Phase 1) |
 | 1 | From-scratch Llama (RoPE w/ Llama 3 scaling, GQA, SwiGLU), safetensors loading, sampler, naive engine, HF parity | done (human asked to start Phase 2) |
-| 2 | Benchmark + profiling harness, HF and vLLM baselines | in progress (P2.2 done) |
+| 2 | Benchmark + profiling harness, HF and vLLM baselines | in progress (P2.3 done) |
 | 3 | Paged KV cache, block manager, KV store, reference paged attention, prefix cache | not started |
 | 4 | Continuous batching scheduler, chunked prefill, preemption, engine step loop | not started |
 | 5 | Triton kernels: fused add+RMSNorm, RoPE, paged decode attention (split-K and prefill are stretch) | not started |
@@ -105,7 +105,8 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `tinyserve/engine/sampler.py` | `sample_token`: temperature, then top-k, then top-p. A per-request `torch.Generator` keeps seeds from sharing the global RNG. |
 | `tinyserve/engine/engine.py` | `Engine.generate(prompts, sampling_params)` runs one request at a time on a fresh `ContiguousKVCache`. Stop ids are not emitted. `generate_tokens` is the same loop for callers who already have ids. `GenerationResult` carries `ttft_s`, `e2e_s`, and `itl_s`, taken after the logits for that token are ready. The cache write after the last token is outside those times. |
 | `bench/datasets.py` | ShareGPT, code (JSON/JSONL), shared-prefix, and synthetic workloads. Length filter, then a hash-ordered subset for a fixed seed. `prompt_token_ids` is what a benchmark must send. |
-| `bench/offline.py` | `run_offline` runs each sample to a fixed length, drops a separate warmup pass, repeats, and writes one Section 11 JSONL (meta, per-request, summary). Summary percentiles come from the median repeat by output throughput. |
+| `bench/offline.py` | `run_offline` runs each sample to a fixed length, drops a separate warmup pass, repeats, and writes one Section 11 JSONL (meta, per-request, summary). Summary percentiles come from the median repeat by output throughput. `request_record` / `write_benchmark_jsonl` are the shared row shape. |
+| `bench/baselines.py` | `run_hf_generate` times Hugging Face `generate` on the same samples. `profile_generation` writes a `torch.profiler` summary of one TinyServe request. The CLI loads one model at a time. |
 | `bench/microbench/` | Kernel microbenchmarks (empty until Phase 5) |
 | `eval/` | Parity and perplexity evaluation (empty until Phase 1/9) |
 | `tests/fixtures/tiny_llama.json` | Tiny random Llama config in HF `config.json` format: 2 layers, hidden 64, 4 Q heads, 2 KV heads, head_dim 16, vocab 256, intermediate 128, Llama 3 `rope_scaling` |
@@ -120,10 +121,14 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `tests/unit/test_engine.py` | One-at-a-time generation: greedy token ids match Hugging Face exactly on the tiny model, stop ids are excluded, a seed repeats. |
 | `tests/unit/test_datasets.py` | Length filtering and fixed-seed subsets for all four workloads, using in-test fixtures. |
 | `tests/unit/test_offline.py` | Section 11 JSONL schema on the tiny model (written under `tmp_path`, not committed) and median-repeat selection. |
+| `tests/unit/test_baselines.py` | Hugging Face `generate` JSONL shape and a profiler summary, both on the tiny model. |
 | `tests/gpu/test_llama_parity.py` | (`gpu`, `slow`) Llama-3.2-1B bf16 greedy parity vs Hugging Face. Skipped when the weights are absent. |
 | `tests/gpu/test_engine_generate.py` | (`gpu`, `slow`) `Engine.generate` on one 1B prompt matches a Hugging Face argmax loop. Skipped when the weights are absent. |
 | `docs/results/phase1/2026-10-01_p1-4-greedy-parity.json` | Script-written 1B parity result. 10/10 prompts matched on the first 32 of 64 tokens; max absolute logit difference 0.0. |
 | `docs/results/phase1/2026-10-02_p1-6-naive-engine.json` | Script-written engine check: one bf16 prompt, 16 greedy tokens, matched Hugging Face. |
+| `docs/results/phase2/2026-10-06_p2-3-tinyserve-offline.jsonl` | Script-written naive TinyServe offline run on Llama-3.2-1B bf16. Synthetic, 8 requests, prompt 64, output 32, warmup 2, 3 repeats. Median output throughput is the summary line. Dirty run. |
+| `docs/results/phase2/2026-10-06_p2-3-hf-generate.jsonl` | Same requests through Hugging Face `generate`. Median output throughput is the summary line. Dirty run. |
+| `docs/results/phase2/2026-10-06_p2-3-profiler.json` | Script-written profiler table for one TinyServe request of that shape. Self CPU time exceeds self CUDA time. `aten::mm` is most of the device time. |
 | `tests/gpu/test_env_info_gpu.py` | (`gpu`) GPU fields are populated |
 
 ## 7. Environment and hardware
@@ -185,7 +190,7 @@ Full entries are in `docs/DECISIONS.md`.
 
 ## 12. Next steps
 
-1. P2.3 baselines: committed naive TinyServe and Hugging Face `generate` results on the dev model, plus a short note on where time goes (`torch.profiler`).
+1. P2.4 vLLM baseline: separate virtualenv, `bench/vllm_baseline.md` with the exact command and version, and an offline result on the dev model.
 2. Human: revoke the HF token that was pasted in chat and replace the `HF_TOKEN` line in `~/.bashrc`. Request Llama 3.1 8B access before the final benchmarks.
 
 ## 13. Change log
@@ -206,3 +211,4 @@ Full entries are in `docs/DECISIONS.md`.
 - 2026-10-02 P1.6: naive engine, one request at a time on the contiguous cache. Tiny-model greedy ids match HF; 1B engine check is in the result file. Phase 1 code complete, waiting for the human review gate.
 - 2026-10-02 P2.1: workload loader (ShareGPT, code, shared prefix, synthetic) with length filters and a hash-ordered seed. Human asked to start Phase 2. HumanEval download is official JSONL (D-009).
 - 2026-10-06 P2.2: offline benchmark writes a Section 11 JSONL (throughput, TTFT, TPOT, ITL). Warmup is a separate pass. No dev-model timing file yet; that is P2.3.
+- 2026-10-06 P2.3: naive TinyServe and Hugging Face `generate` baselines on Llama-3.2-1B, plus a profiler table for one request. Numbers are only in the phase2 result files.

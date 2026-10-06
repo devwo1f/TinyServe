@@ -30,6 +30,11 @@ class GenerationResult:
     output_token_ids: list[int]
     text: str
     num_computed_tokens: int
+    # Seconds from the start of this request. None when no token was emitted.
+    # The last cache write, after the final token already exists, is not included.
+    ttft_s: float | None = None
+    e2e_s: float = 0.0
+    itl_s: list[float] | None = None
 
 
 class Engine:
@@ -103,29 +108,52 @@ class Engine:
         self._next_seq_id += 1
         generator = _request_generator(params, device)
         stop_ids = set(params.stop_token_ids)
+        # perf_counter, and a GPU sync before each read: the forward returns
+        # before the kernels finish, so an unsynced clock measures the launch.
+        arrival = time.perf_counter()
+        sequence.arrival_time = arrival
 
         input_ids = torch.tensor([prompt_ids], dtype=torch.long, device=device)  # [1, S]
         logits = self.model(input_ids, cache=cache)  # [1, S, vocab]
+        _sync(device)
         next_logits = logits[0, -1]  # [vocab]
+        token_times: list[float] = []
         for _ in range(params.max_tokens):
             token = int(sample_token(next_logits, params, generator).item())
             if token in stop_ids:
                 break
+            # `.item()` has already waited for the logits this token came from.
+            # The forward below stores this token and builds the next logits.
+            token_times.append(time.perf_counter())
             if sequence.first_token_time is None:
-                sequence.first_token_time = time.monotonic()
+                sequence.first_token_time = token_times[0]
             sequence.output_token_ids.append(token)
             step = torch.tensor([[token]], dtype=torch.long, device=device)  # [1, 1]
             # Writing this token's KV keeps num_computed_tokens equal to the
             # tokens that are actually in the cache, including the last one.
             next_logits = self.model(step, cache=cache)[0, -1]  # [vocab]
+            _sync(device)
         sequence.status = SequenceStatus.FINISHED
         sequence.num_computed_tokens = cache.length
+        finished = time.perf_counter()
+        ttft = None if not token_times else token_times[0] - arrival
+        e2e = (token_times[-1] if token_times else finished) - arrival
+        itl = [token_times[i] - token_times[i - 1] for i in range(1, len(token_times))]
         return GenerationResult(
             prompt_token_ids=sequence.prompt_token_ids,
             output_token_ids=list(sequence.output_token_ids),
             text=self.tokenizer.decode(sequence.output_token_ids),
             num_computed_tokens=sequence.num_computed_tokens,
+            ttft_s=ttft,
+            e2e_s=e2e,
+            itl_s=itl,
         )
+
+
+def _sync(device: torch.device) -> None:
+    """Wait until queued GPU work for this request has finished."""
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
 
 
 def _request_generator(params: SamplingParams, device: torch.device) -> torch.Generator | None:

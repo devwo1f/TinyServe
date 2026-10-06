@@ -22,6 +22,16 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-10-06 | Cursor | Task P2.2
+
+**Status:** done
+**What changed:** `bench/offline.py` runs a fixed sample list through `Engine.generate_tokens` and writes a Section 11 JSONL (config, env info, git commit, one row per request per repeat, summary). `GenerationResult` now carries TTFT, E2E, and inter-token latencies. CUDA work is synchronized before the clock is read. The cache write after the last token is outside those per-request times.
+**Tests:** `tests/unit/test_offline.py`. CPU: tiny-model JSONL matches its own token counts and clock; the median repeat is the middle throughput; warmup runs are not rows; an EOS id can stop a request. `tests/unit/test_engine.py` also checks the new timing fields.
+**Results:** none. A tiny-model timing file is not a baseline. The dev-model numbers are P2.3.
+**Decisions:** none
+**Next step:** P2.3 baselines: naive TinyServe and Hugging Face `generate` on the dev model, with a `torch.profiler` note on where time goes.
+**Questions for the human:** none
+
 ## 2026-10-02 | HUMAN (via session) | Gate after Phase 1 passed
 
 Human asked to start Phase 2.

@@ -22,8 +22,8 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 ## 2. Current status
 
 - **Phase:** 2 (Benchmark and profiling harness)
-- **Last completed task:** P2.4 vLLM baseline
-- **In progress:** P2.5 profiling scripts (`nsys` / `ncu` wrappers). Dev environment is WSL2 (D-007). Llama 3.2 access is approved and `Llama-3.2-1B-Instruct` is downloaded locally. Human asked to start Phase 2 on 2026-10-02.
+- **Last completed task:** P2.5 profiling scripts
+- **In progress:** Phase 2 is waiting on the human review gate. Nsight Compute still needs the Windows performance-counter switch, so there is no ncu result file yet. Dev environment is WSL2 (D-007). Llama 3.2 access is approved and `Llama-3.2-1B-Instruct` is downloaded locally. Human asked to start Phase 2 on 2026-10-02.
 - **Working copy:** `~/TinyServe` inside WSL2 Ubuntu 24.04 (user `abhay`), opened in Cursor via the WSL remote. Do not develop in the old `D:\Projects\TinyServe` Windows copy.
 - **Review gates passed:** Phase 0 and Phase 1 (human asked to start the next phase)
 - **GitHub:** https://github.com/devwo1f/TinyServe (public)
@@ -34,7 +34,7 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 |---|---|---|
 | 0 | Skeleton, docs, env scripts, config, CI | done (human asked to start Phase 1) |
 | 1 | From-scratch Llama (RoPE w/ Llama 3 scaling, GQA, SwiGLU), safetensors loading, sampler, naive engine, HF parity | done (human asked to start Phase 2) |
-| 2 | Benchmark + profiling harness, HF and vLLM baselines | in progress (P2.4 done) |
+| 2 | Benchmark + profiling harness, HF and vLLM baselines | in progress (P2.5 done; ncu counters blocked on the Windows host) |
 | 3 | Paged KV cache, block manager, KV store, reference paged attention, prefix cache | not started |
 | 4 | Continuous batching scheduler, chunked prefill, preemption, engine step loop | not started |
 | 5 | Triton kernels: fused add+RMSNorm, RoPE, paged decode attention (split-K and prefill are stretch) | not started |
@@ -109,6 +109,10 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `bench/baselines.py` | `run_hf_generate` times Hugging Face `generate` on the same samples. `profile_generation` writes a `torch.profiler` summary of one TinyServe request. The CLI loads one model at a time. |
 | `bench/vllm_offline.py` | Runs the same synthetic set through vLLM's `LLM.generate` (one batched call per repeat) and writes a Section 11 JSONL. Executed with the separate venv, not TinyServe's. |
 | `bench/vllm_baseline.md` | Exact install commands, versions, and the run command for that venv (`/home/abhay/venvs/tinyserve-vllm`, vLLM 0.31.0+cu129). |
+| `scripts/profile_target.py` | One greedy naive-engine request. Warmup stays outside `cudaProfilerStart` / `Stop`. |
+| `scripts/profile_nsys.sh` | Nsight Systems timeline of that request. Writes a small JSON summary; the `.nsys-rep` stays in `profiles/`. |
+| `scripts/profile_ncu.sh` | Nsight Compute on the first few launches inside the same profiler range. Needs Windows GPU performance counters. |
+| `scripts/profile_summary.py` | Turns an nsys sqlite or an ncu CSV into the result JSON. `coverage_ns` is the idle-gap math. |
 | `bench/microbench/` | Kernel microbenchmarks (empty until Phase 5) |
 | `eval/` | Parity and perplexity evaluation (empty until Phase 1/9) |
 | `tests/fixtures/tiny_llama.json` | Tiny random Llama config in HF `config.json` format: 2 layers, hidden 64, 4 Q heads, 2 KV heads, head_dim 16, vocab 256, intermediate 128, Llama 3 `rope_scaling` |
@@ -125,6 +129,7 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `tests/unit/test_offline.py` | Section 11 JSONL schema on the tiny model (written under `tmp_path`, not committed) and median-repeat selection. |
 | `tests/unit/test_baselines.py` | Hugging Face `generate` JSONL shape and a profiler summary, both on the tiny model. |
 | `tests/unit/test_vllm_offline.py` | vLLM latency math and fixed-length rows. Does not import vLLM. |
+| `tests/unit/test_profile_summary.py` | Idle-gap math, nsys sqlite name lookup, and ncu CSV bandwidth. No GPU and no Nsight binary. |
 | `tests/gpu/test_llama_parity.py` | (`gpu`, `slow`) Llama-3.2-1B bf16 greedy parity vs Hugging Face. Skipped when the weights are absent. |
 | `tests/gpu/test_engine_generate.py` | (`gpu`, `slow`) `Engine.generate` on one 1B prompt matches a Hugging Face argmax loop. Skipped when the weights are absent. |
 | `docs/results/phase1/2026-10-01_p1-4-greedy-parity.json` | Script-written 1B parity result. 10/10 prompts matched on the first 32 of 64 tokens; max absolute logit difference 0.0. |
@@ -133,6 +138,7 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `docs/results/phase2/2026-10-06_p2-3-hf-generate.jsonl` | Same requests through Hugging Face `generate`. Median output throughput is the summary line. Dirty run. |
 | `docs/results/phase2/2026-10-06_p2-3-profiler.json` | Script-written profiler table for one TinyServe request of that shape. Self CPU time exceeds self CUDA time. `aten::mm` is most of the device time. |
 | `docs/results/phase2/2026-10-06_p2-4-vllm-offline.jsonl` | Script-written vLLM offline run, same synthetic ids, one batched `generate` per repeat. Median output throughput is the summary line. ITL percentiles are null. Dirty run. |
+| `docs/results/phase2/2026-10-06_p2-5-nsys.json` | Script-written Nsight Systems summary of one naive 1B request (prompt 64, 16 new tokens). Idle fraction is in the summary. Dirty run. No ncu file: counters are blocked on the Windows host. |
 | `tests/gpu/test_env_info_gpu.py` | (`gpu`) GPU fields are populated |
 
 ## 7. Environment and hardware
@@ -194,8 +200,9 @@ Full entries are in `docs/DECISIONS.md`.
 
 ## 12. Next steps
 
-1. P2.5 profiling scripts: `scripts/profile_nsys.sh` and `scripts/profile_ncu.sh`, plus a learning note from a run on the naive engine.
-2. Human: revoke the HF token that was pasted in chat and replace the `HF_TOKEN` line in `~/.bashrc`. Request Llama 3.1 8B access before the final benchmarks.
+1. Human: in NVIDIA App, allow GPU performance counters for all users, then rerun `bash scripts/profile_ncu.sh` so an ncu summary exists.
+2. Human confirms the Phase 2 review gate in `docs/PROGRESS.md` before Phase 3 starts.
+3. Human: revoke the HF token that was pasted in chat and replace the `HF_TOKEN` line in `~/.bashrc`. Request Llama 3.1 8B access before the final benchmarks.
 
 ## 13. Change log
 
@@ -217,3 +224,4 @@ Full entries are in `docs/DECISIONS.md`.
 - 2026-10-06 P2.2: offline benchmark writes a Section 11 JSONL (throughput, TTFT, TPOT, ITL). Warmup is a separate pass. No dev-model timing file yet; that is P2.3.
 - 2026-10-06 P2.3: naive TinyServe and Hugging Face `generate` baselines on Llama-3.2-1B, plus a profiler table for one request. Numbers are only in the phase2 result files.
 - 2026-10-06 P2.4: vLLM 0.31.0 in its own venv, batched offline result on the same synthetic 1B requests. Commands are in `bench/vllm_baseline.md`.
+- 2026-10-06 P2.5: Nsight Systems and Nsight Compute wrappers. The nsys summary of one naive 1B request is in the phase2 result file. ncu is blocked on Windows GPU performance counters.

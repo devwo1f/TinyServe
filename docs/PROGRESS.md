@@ -22,6 +22,16 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-10-06 | Cursor | Task P2.5
+
+**Status:** done
+**What changed:** `scripts/profile_nsys.sh` and `scripts/profile_ncu.sh` profile one naive-engine request. `scripts/profile_target.py` keeps weight loading and one warmup request outside the CUDA profiler range. `scripts/profile_summary.py` writes a small JSON from the nsys sqlite (kernel span, busy union, idle gaps) or from an ncu CSV. Nsight 2026 builds live under `$HOME/opt`, not in the project venv. Raw reports stay in `profiles/`.
+**Tests:** `tests/unit/test_profile_summary.py`. CPU: idle-gap math, sqlite kernel names, ncu CSV bandwidth, and `bash -n` on the wrappers. GPU: the nsys wrapper wrote the result file below. `bash scripts/profile_ncu.sh` exited 1 with `ERR_NVGPUCTRPERM`, including when rerun as root in WSL, so there is no ncu result file.
+**Results:** `docs/results/phase2/2026-10-06_p2-5-nsys.json`. The run was dirty (measured `a6cc7bb` plus this diff).
+**Decisions:** none
+**Next step:** Human enables GPU performance counters for all users in NVIDIA App (System > Advanced > Developer > Manage GPU Performance Counters), then reruns `bash scripts/profile_ncu.sh`. Phase 3 does not start until the human confirms the Phase 2 review gate.
+**Questions for the human:** Enable the performance-counter switch, then say so and the ncu summary can be recorded. Confirm the Phase 2 gate when you are ready for paged KV cache.
+
 ## 2026-10-06 | Cursor | Task P2.4
 
 **Status:** done

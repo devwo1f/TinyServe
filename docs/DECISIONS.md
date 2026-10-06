@@ -51,6 +51,12 @@ Format: `D-<n>` for decisions, `Q-<n>` for open questions. Resolved questions be
 - **Decision:** Pin `transformers==5.17.0` (pulls `tokenizers` and `safetensors`). `Tokenizer.from_pretrained` sets `clean_up_tokenization_spaces=False` because that post-process is for WordPiece and corrupts byte-level BPE. In this version `apply_chat_template(..., tokenize=True)` returns a `BatchEncoding`; the wrapper reads `input_ids`.
 - **Not a serving dependency:** model forward, KV cache, and sampling stay in TinyServe code.
 
+### D-009: HumanEval is the official JSONL, not the Hugging Face parquet
+- **Date:** 2026-10-02 (P2.1)
+- **Context:** `bench/datasets.py` has to read code prompts in CI without a new package. The Hugging Face `openai/openai_humaneval` repo ships parquet, which needs `pyarrow` or `datasets`.
+- **Decision:** `scripts/download_datasets.sh humaneval` downloads the official `HumanEval.jsonl.gz` from the openai/human-eval GitHub repo and unpacks `data/humaneval/humaneval.jsonl`. The loader reads a JSON list or JSONL with `prompt` and `canonical_solution` (or `completion`).
+- **Not added:** `datasets`, `pyarrow`.
+
 ---
 
 ## Open questions

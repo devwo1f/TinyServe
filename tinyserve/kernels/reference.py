@@ -17,7 +17,31 @@ from collections.abc import Sequence
 import torch
 from torch import nn
 
-from tinyserve.model.llama import _causal_mask, repeat_kv
+
+def _causal_mask(q_len: int, k_len: int, device: torch.device) -> torch.Tensor:
+    """True where a query may attend. Queries sit at the end of the key sequence.
+
+    Shape ``[q_len, k_len]``. Query local index ``i`` is absolute position
+    ``k_len - q_len + i``. The contiguous model uses this same mask: a short
+    query has to see the end of the cache, not the start.
+    """
+    q_pos = torch.arange(k_len - q_len, k_len, device=device)[:, None]  # [q_len, 1]
+    k_pos = torch.arange(k_len, device=device)[None, :]  # [1, k_len]
+    return k_pos <= q_pos
+
+
+def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
+    """Repeat each KV head across the query heads that share it.
+
+    ``x`` is ``[batch, num_kv_heads, seq, head_dim]``. Grouped-query attention
+    has several query heads read one KV head, so the KV tensor is repeated
+    before the score. ``n_rep`` 1 is the multi-head case and returns ``x``.
+    """
+    if n_rep == 1:
+        return x
+    batch, n_kv, seq, dim = x.shape
+    expanded = x[:, :, None, :, :].expand(batch, n_kv, n_rep, seq, dim)
+    return expanded.reshape(batch, n_kv * n_rep, seq, dim)  # [batch, num_heads, seq, head_dim]
 
 
 def standard_attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
@@ -145,3 +169,61 @@ def paged_attention(
     if not outputs:
         return query.new_empty(query.shape)
     return torch.cat(outputs, dim=0)  # [num_seqs, num_heads, q_len, head_dim]
+
+
+def block_table_ids(row: torch.Tensor) -> list[int]:
+    """Drop a trailing ``-1`` pad. Block 0 is a real block, so the pad is not 0.
+
+    A ``-1`` in the middle is a hole, not padding, and is rejected.
+    """
+    ids = [int(block_id) for block_id in row.tolist()]
+    if -1 not in ids:
+        return ids
+    first_pad = ids.index(-1)
+    if any(block_id != -1 for block_id in ids[first_pad:]):
+        raise ValueError("block table pad must be trailing -1s")
+    return ids[:first_pad]
+
+
+def paged_attention_flat(
+    query: torch.Tensor,
+    k_cache: torch.Tensor,
+    v_cache: torch.Tensor,
+    block_tables: torch.Tensor,
+    seq_lens: torch.Tensor,
+    query_start_loc: torch.Tensor,
+) -> torch.Tensor:
+    """Paged attention for a flattened batch whose sequences have different query lengths.
+
+    ``query`` is ``[num_tokens, num_heads, head_dim]``. ``query_start_loc`` is
+    the prefix sum of those lengths, shape ``[num_seqs + 1]``. ``block_tables``
+    is ``[num_seqs, max_blocks]`` padded with ``-1``. Each sequence's query is
+    the last ``q_len`` tokens of its context, already written into the cache.
+    """
+    if query.ndim != 3:
+        raise ValueError("query must be [num_tokens, num_heads, head_dim]")
+    num_tokens = query.shape[0]
+    if query_start_loc.ndim != 1 or query_start_loc.shape[0] < 1:
+        raise ValueError("query_start_loc must be [num_seqs + 1]")
+    num_seqs = query_start_loc.shape[0] - 1
+    if block_tables.shape[0] != num_seqs or seq_lens.shape != (num_seqs,):
+        raise ValueError("block tables and seq_lens must have one row per sequence")
+    if int(query_start_loc[0]) != 0 or int(query_start_loc[-1]) != num_tokens:
+        raise ValueError("query_start_loc must cover every query token")
+    pieces: list[torch.Tensor] = []
+    for index in range(num_seqs):
+        start = int(query_start_loc[index])
+        end = int(query_start_loc[index + 1])
+        if end <= start:
+            raise ValueError("each sequence needs at least one query token")
+        # [1, num_heads, q_len, head_dim]
+        one_query = query[start:end].transpose(0, 1).unsqueeze(0).contiguous()
+        attended = paged_attention(
+            one_query,
+            k_cache,
+            v_cache,
+            [block_table_ids(block_tables[index])],
+            [int(seq_lens[index])],
+        )
+        pieces.append(attended.squeeze(0).transpose(0, 1))  # [q_len, num_heads, head_dim]
+    return torch.cat(pieces, dim=0)  # [num_tokens, num_heads, head_dim]

@@ -16,6 +16,9 @@ from pathlib import Path
 import torch
 from torch import nn
 
+from tinyserve.kernels.kv_store import write_layer_kv
+from tinyserve.kernels.reference import _causal_mask, paged_attention_flat, repeat_kv
+from tinyserve.kv.cache import PagedKVCache
 from tinyserve.model.rope import RopeScaling, apply_rotary, compute_inv_freq, rotary_cos_sin
 
 
@@ -110,28 +113,6 @@ class ContiguousKVCache:
         self.v[layer, :, start : start + seq] = value.transpose(1, 2)
 
 
-def _causal_mask(q_len: int, k_len: int, device: torch.device) -> torch.Tensor:
-    """True where a query may attend. Queries sit at the end of the key sequence.
-
-    Shape [q_len, k_len]. Query local index i is absolute position (k_len - q_len + i).
-    """
-    q_pos = torch.arange(k_len - q_len, k_len, device=device)[:, None]  # [q_len, 1]
-    k_pos = torch.arange(k_len, device=device)[None, :]  # [1, k_len]
-    return k_pos <= q_pos
-
-
-def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
-    """Repeat each KV head across the query heads that share it.
-
-    x: [B, Nk, S, D] -> [B, Nq, S, D]. A no-op when the model is not using GQA.
-    """
-    if n_rep == 1:
-        return x
-    batch, n_kv, seq, dim = x.shape
-    expanded = x[:, :, None, :, :].expand(batch, n_kv, n_rep, seq, dim)
-    return expanded.reshape(batch, n_kv * n_rep, seq, dim)
-
-
 class Attention(nn.Module):
     """Grouped-query attention. Several query heads share one KV head, which shrinks the cache."""
 
@@ -194,6 +175,38 @@ class Attention(nn.Module):
         out = out.transpose(1, 2).contiguous().view(batch, seq, -1)  # [B, S, Nq * D]
         return self.o_proj(out)
 
+    def forward_paged(
+        self,
+        hidden: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+        k_cache: torch.Tensor,
+        v_cache: torch.Tensor,
+        slots: torch.Tensor,
+        block_tables: torch.Tensor,
+        seq_lens: torch.Tensor,
+        query_start_loc: torch.Tensor,
+    ) -> torch.Tensor:
+        """Attention over a flattened batch. K and V are written before the scores.
+
+        ``hidden`` is ``[num_tokens, hidden]``. The new tokens are already
+        assigned slots, and ``seq_lens`` counts them. Writing first is what
+        lets a query at the end of a chunk see its own key.
+        """
+        num_tokens = hidden.shape[0]
+        query = self.q_proj(hidden).view(num_tokens, self.num_heads, self.head_dim)
+        key = self.k_proj(hidden).view(num_tokens, self.num_kv_heads, self.head_dim)
+        value = self.v_proj(hidden).view(num_tokens, self.num_kv_heads, self.head_dim)
+        # apply_rotary wants a batch and a sequence axis. The flat batch is one row.
+        query_r = query.unsqueeze(0).transpose(1, 2)  # [1, Nq, num_tokens, D]
+        key_r = key.unsqueeze(0).transpose(1, 2)  # [1, Nk, num_tokens, D]
+        query_r, key_r = apply_rotary(query_r, key_r, cos.unsqueeze(0), sin.unsqueeze(0))
+        query = query_r.squeeze(0).transpose(0, 1)  # [num_tokens, Nq, D]
+        key = key_r.squeeze(0).transpose(0, 1)  # [num_tokens, Nk, D]
+        write_layer_kv(k_cache, v_cache, key, value, slots)
+        out = paged_attention_flat(query, k_cache, v_cache, block_tables, seq_lens, query_start_loc)
+        return self.o_proj(out.reshape(num_tokens, -1))  # [num_tokens, Nq * D]
+
 
 class MLP(nn.Module):
     """SwiGLU: silu(gate(x)) * up(x), then down. Two up-projections, gated, instead of one."""
@@ -239,6 +252,29 @@ class DecoderLayer(nn.Module):
         hidden = self.mlp(self.post_attention_layernorm(hidden))
         return residual + hidden
 
+    def forward_paged(
+        self,
+        hidden: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+        k_cache: torch.Tensor,
+        v_cache: torch.Tensor,
+        slots: torch.Tensor,
+        block_tables: torch.Tensor,
+        seq_lens: torch.Tensor,
+        query_start_loc: torch.Tensor,
+    ) -> torch.Tensor:
+        """Same residual block as ``forward``, over the flattened paged batch."""
+        residual = hidden
+        normed = self.input_layernorm(hidden)  # [num_tokens, H]
+        hidden = self.self_attn.forward_paged(
+            normed, cos, sin, k_cache, v_cache, slots, block_tables, seq_lens, query_start_loc
+        )
+        hidden = residual + hidden
+        residual = hidden
+        hidden = self.mlp(self.post_attention_layernorm(hidden))
+        return residual + hidden
+
 
 class LlamaModel(nn.Module):
     """Token embeddings, decoder stack, and final norm. Does not produce logits."""
@@ -278,6 +314,41 @@ class LlamaModel(nn.Module):
             cache.length = start + seq
         return self.norm(hidden)
 
+    def forward_paged(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        cache: PagedKVCache,
+        slots: torch.Tensor,
+        block_tables: torch.Tensor,
+        seq_lens: torch.Tensor,
+        query_start_loc: torch.Tensor,
+    ) -> torch.Tensor:
+        """Flattened tokens. Returns hidden states ``[num_tokens, hidden]``.
+
+        ``positions`` are the absolute positions of those tokens, not a range
+        starting at 0, so a decode token keeps the position it has in the
+        sequence. Every layer writes its own pages and then reads them back.
+        """
+        hidden = self.embed_tokens(input_ids)  # [num_tokens, H]
+        pos = positions.view(1, -1)  # [1, num_tokens]
+        cos, sin = rotary_cos_sin(self.inv_freq.to(device=hidden.device), pos)
+        cos = cos[0].to(dtype=hidden.dtype)  # [num_tokens, head_dim]
+        sin = sin[0].to(dtype=hidden.dtype)
+        for index, layer in enumerate(self.layers):
+            hidden = layer.forward_paged(
+                hidden,
+                cos,
+                sin,
+                cache.k[index],
+                cache.v[index],
+                slots,
+                block_tables,
+                seq_lens,
+                query_start_loc,
+            )
+        return self.norm(hidden)
+
 
 class LlamaForCausalLM(nn.Module):
     """Full model. Tied embeddings share one matrix for the input embedding and the LM head."""
@@ -299,3 +370,25 @@ class LlamaForCausalLM(nn.Module):
         """input_ids: [B, S]. Returns logits [B, S, vocab]."""
         hidden = self.model(input_ids, cache=cache, position_ids=position_ids)  # [B, S, H]
         return self.lm_head(hidden)  # [B, S, vocab]
+
+    def forward_paged(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        cache: PagedKVCache,
+        slots: torch.Tensor,
+        block_tables: torch.Tensor,
+        seq_lens: torch.Tensor,
+        query_start_loc: torch.Tensor,
+        logits_indices: torch.Tensor,
+    ) -> torch.Tensor:
+        """Logits only at ``logits_indices``. Shape ``[num_indices, vocab]``.
+
+        The LM head is the large vocabulary matrix. Sampling needs the last
+        token of each sequence, so the other positions skip that multiply.
+        """
+        hidden = self.model.forward_paged(
+            input_ids, positions, cache, slots, block_tables, seq_lens, query_start_loc
+        )
+        selected = hidden[logits_indices]  # [num_indices, H]
+        return self.lm_head(selected)  # [num_indices, vocab]

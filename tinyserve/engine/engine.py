@@ -1,9 +1,8 @@
 """Offline generation, one request at a time.
 
-The contiguous cache is one dense buffer per sequence. A second request would
-need its own buffer or a scheduler, and neither exists yet, so this loop
-finishes a prompt before starting the next. Phase 4 replaces the loop with
-continuous batching; the sampler and the model stay.
+Each request gets its own paged pool, large enough for the prompt plus
+``max_tokens``. A second request waits until this one frees its blocks.
+Phase 4 replaces the loop with a shared pool and continuous batching.
 """
 
 import time
@@ -11,9 +10,12 @@ from dataclasses import dataclass
 
 import torch
 
+from tinyserve.engine.model_runner import prepare_model_input, run_paged
 from tinyserve.engine.sampler import sample_token
 from tinyserve.engine.sequence import SamplingParams, Sequence, SequenceStatus
-from tinyserve.model.llama import ContiguousKVCache, LlamaForCausalLM
+from tinyserve.kv.block_manager import BlockManager, blocks_for_tokens
+from tinyserve.kv.cache import PagedKVCache
+from tinyserve.model.llama import LlamaForCausalLM
 from tinyserve.model.tokenizer import Tokenizer
 
 
@@ -38,15 +40,19 @@ class GenerationResult:
 
 
 class Engine:
-    """Run `LlamaForCausalLM` with the contiguous cache and the sampler.
+    """Run ``LlamaForCausalLM`` on a paged KV cache, one request at a time.
 
-    `generate` is the spec's offline API. `generate_tokens` is the same loop
-    for callers who already have ids (a chat template, or a test).
+    ``generate`` is the spec's offline API. ``generate_tokens`` is the same
+    loop for callers who already have ids (a chat template, or a test).
+    ``block_size`` is the page size. The default matches ``CacheConfig``.
     """
 
-    def __init__(self, model: LlamaForCausalLM, tokenizer: Tokenizer):
+    def __init__(self, model: LlamaForCausalLM, tokenizer: Tokenizer, block_size: int = 16):
+        if block_size < 1:
+            raise ValueError("block_size must be positive")
         self.model = model
         self.tokenizer = tokenizer
+        self.block_size = block_size
         self._next_seq_id = 0
 
     def generate(
@@ -86,14 +92,20 @@ class Engine:
             )
         device = next(self.model.parameters()).device
         dtype = next(self.model.parameters()).dtype
-        # One buffer for this request only. The next request allocates its own.
-        cache = ContiguousKVCache(
-            self.model.config,
-            batch=1,
-            max_len=len(prompt_ids) + params.max_tokens,
+        block_size = self.block_size
+        num_slots = len(prompt_ids) + params.max_tokens
+        num_blocks = blocks_for_tokens(num_slots, block_size)
+        config = self.model.config
+        cache = PagedKVCache(
+            num_blocks=num_blocks,
+            block_size=block_size,
+            num_layers=config.num_hidden_layers,
+            num_kv_heads=config.num_key_value_heads,
+            head_dim=config.head_dim,
             dtype=dtype,
             device=device,
         )
+        manager = BlockManager(num_blocks, block_size)
         sequence = Sequence(
             seq_id=self._next_seq_id,
             prompt_token_ids=list(prompt_ids),
@@ -106,6 +118,7 @@ class Engine:
             first_token_time=None,
         )
         self._next_seq_id += 1
+        manager.allocate(sequence, len(prompt_ids))
         generator = _request_generator(params, device)
         stop_ids = set(params.stop_token_ids)
         # perf_counter, and a GPU sync before each read: the forward returns
@@ -113,10 +126,11 @@ class Engine:
         arrival = time.perf_counter()
         sequence.arrival_time = arrival
 
-        input_ids = torch.tensor([prompt_ids], dtype=torch.long, device=device)  # [1, S]
-        logits = self.model(input_ids, cache=cache)  # [1, S, vocab]
+        prefill = prepare_model_input([sequence], [len(prompt_ids)], block_size, device)
+        logits = run_paged(self.model, cache, prefill)  # [1, vocab]
+        sequence.num_computed_tokens = len(prompt_ids)
         _sync(device)
-        next_logits = logits[0, -1]  # [vocab]
+        next_logits = logits[0]  # [vocab]
         token_times: list[float] = []
         for _ in range(params.max_tokens):
             token = int(sample_token(next_logits, params, generator).item())
@@ -128,13 +142,13 @@ class Engine:
             if sequence.first_token_time is None:
                 sequence.first_token_time = token_times[0]
             sequence.output_token_ids.append(token)
-            step = torch.tensor([[token]], dtype=torch.long, device=device)  # [1, 1]
-            # Writing this token's KV keeps num_computed_tokens equal to the
-            # tokens that are actually in the cache, including the last one.
-            next_logits = self.model(step, cache=cache)[0, -1]  # [vocab]
+            manager.allocate(sequence, 1)
+            step = prepare_model_input([sequence], [1], block_size, device)
+            next_logits = run_paged(self.model, cache, step)[0]  # [vocab]
+            sequence.num_computed_tokens += 1
             _sync(device)
         sequence.status = SequenceStatus.FINISHED
-        sequence.num_computed_tokens = cache.length
+        manager.free(sequence)
         finished = time.perf_counter()
         ttft = None if not token_times else token_times[0] - arrival
         e2e = (token_times[-1] if token_times else finished) - arrival

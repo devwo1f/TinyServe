@@ -22,6 +22,16 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-10-07 | Cursor | Task P3.6
+
+**Status:** done
+**What changed:** `tinyserve/kv/prefix_cache.py` hashes each full prompt block with its parent hash and maps that to a physical block. `match` stops at the first miss and never returns the block that holds the last prompt token. After a request finishes, full blocks are cached and parked; the rest return to the free list. `Engine.generate_tokens` keeps one pool for the call, shares a hit, and prefills only the tail. If the free list is short, the oldest unused cached block is reclaimed. `BlockManager.share` accepts a parked block. `bench/prefix_cache.py` runs the shared-prefix prompts with caching off, then on.
+**Tests:** `tests/unit/test_prefix_cache.py`. CPU: a change in an earlier block misses the later block; an exact multiple of the block size does not reuse the last block; LRU drops the oldest parked block and a parked block can be shared; a second request on the tiny model reuses 8 tokens and its greedy ids match a cold prefill. Existing engine and block-manager tests still pass. CPU suite: 102 passed, 3 deselected. No new GPU parity test; the 1B measurement is the result file.
+**Results:** `docs/results/phase3/2026-10-07_p3-6-prefix-cache.jsonl`. Four Llama-3.2-1B prompts, 100 tokens each, 8 new tokens, block size 16. Computed prompt tokens: 400 with caching off, 112 with caching on (288 cached). TTFT seconds, off: p50 0.042021384000008766, p90 0.26767375410003075, p99 0.3537614999100412. On: p50 0.03972630149999645, p90 0.05923054309997156, p99 0.06563750620996131. Greedy ids matched. The run was dirty (measured `51546e1` plus this diff). The off run is first, so its first request includes the cold start.
+**Decisions:** none. Conceptual note in REFERENCES.md.
+**Next step:** P3.7 memory waste: allocated slots versus used slots, compared with a contiguous max-length allocation. Commit a result file with both numbers.
+**Questions for the human:** none
+
 ## 2026-10-06 | Cursor | Task P3.5
 
 **Status:** done

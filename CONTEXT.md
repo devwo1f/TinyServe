@@ -22,8 +22,8 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 ## 2. Current status
 
 - **Phase:** 3 (Paged KV cache)
-- **Last completed task:** P3.5 paged model runner
-- **In progress:** P3.6 prefix cache. Dev environment is WSL2 (D-007). Llama 3.2 access is approved and `Llama-3.2-1B-Instruct` is downloaded locally. Human asked to start Phase 3 on 2026-10-06. Nsight Compute counters are still blocked on the Windows host; that does not block paging.
+- **Last completed task:** P3.6 prefix cache
+- **In progress:** P3.7 memory waste measurement. Dev environment is WSL2 (D-007). Llama 3.2 access is approved and `Llama-3.2-1B-Instruct` is downloaded locally. Human asked to start Phase 3 on 2026-10-06. Nsight Compute counters are still blocked on the Windows host; that does not block paging.
 - **Working copy:** `~/TinyServe` inside WSL2 Ubuntu 24.04 (user `abhay`), opened in Cursor via the WSL remote. Do not develop in the old `D:\Projects\TinyServe` Windows copy.
 - **Review gates passed:** Phase 0, Phase 1, and Phase 2 (human asked to start the next phase)
 - **GitHub:** https://github.com/devwo1f/TinyServe (public)
@@ -35,7 +35,7 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 | 0 | Skeleton, docs, env scripts, config, CI | done (human asked to start Phase 1) |
 | 1 | From-scratch Llama (RoPE w/ Llama 3 scaling, GQA, SwiGLU), safetensors loading, sampler, naive engine, HF parity | done (human asked to start Phase 2) |
 | 2 | Benchmark + profiling harness, HF and vLLM baselines | done (human asked to start Phase 3; ncu counters still blocked on the Windows host) |
-| 3 | Paged KV cache, block manager, KV store, reference paged attention, prefix cache | in progress (P3.5 done) |
+| 3 | Paged KV cache, block manager, KV store, reference paged attention, prefix cache | in progress (P3.6 done) |
 | 4 | Continuous batching scheduler, chunked prefill, preemption, engine step loop | not started |
 | 5 | Triton kernels: fused add+RMSNorm, RoPE, paged decode attention (split-K and prefill are stretch) | not started |
 | 6 | CUDA graphs for decode | not started |
@@ -103,13 +103,15 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `tinyserve/config.py` | Torch-free settings. `TinyServeConfig` has sections `model` (model path, tokenizer, dtype `auto`/float32/float16/bfloat16, device, max_model_len, seed), `cache` (block_size 16, gpu_memory_utilization 0.9, memory_safety_margin_gib, num_gpu_blocks_override, enable_prefix_caching), `scheduler` (max_num_batched_tokens 2048, max_num_seqs 64, enable_chunked_prefill), `speculative` (enabled, draft_model, num_speculative_tokens, policy, batch_threshold), `server` (host, port, admission_policy fifo/reject/deadline, TTFT/TPOT SLOs), `benchmark` (workload, num_requests, request_rate, warmup, repeats, seed, ignore_eos, output_dir). API: `apply_overrides(cfg, {"cache.block_size": "32"})`, `add_config_args(parser)` adds `--section.field` flags, `config_from_args(args)`, `cfg.to_dict()` |
 | `tinyserve/engine/sequence.py` | `SamplingParams` (temperature 0 is greedy, top-k -1 is off), `SequenceStatus`, and `Sequence` with the spec Section 9 fields. |
 | `tinyserve/engine/sampler.py` | `sample_token`: temperature, then top-k, then top-p. A per-request `torch.Generator` keeps seeds from sharing the global RNG. |
-| `tinyserve/engine/engine.py` | `Engine.generate(prompts, sampling_params)` runs one request at a time on a fresh paged pool sized for that request. Stop ids are not emitted. `generate_tokens` is the same loop for callers who already have ids. `GenerationResult` carries `ttft_s`, `e2e_s`, and `itl_s`, taken after the logits for that token are ready. The cache write after the last token is outside those times. |
+| `tinyserve/engine/engine.py` | `generate` and `generate_tokens` share one paged pool across the prompts in that call. Full prompt blocks can stay cached. A later request reuses a matching prefix and prefills only the tail. The last prompt token is always computed. `GenerationResult.num_cached_prompt_tokens` is how many prompt tokens were reused. A later call that needs more blocks builds a new pool and drops the cache. Stop ids are not emitted. Timing fields are taken after the logits for that token are ready. |
 | `tinyserve/engine/model_runner.py` | `prepare_model_input` flattens the new tokens into `input_ids`, `positions`, `slot_mapping`, `query_start_loc`, `seq_lens`, `block_tables` (padded with -1), and `logits_indices`. `run_paged` calls `forward_paged`. `num_computed_tokens` advances only after the forward. |
 | `tinyserve/kv/cache.py` | Paged K/V tensors and the startup block count. Budget is `total * utilization - weights - peak activations - safety margin`. `str(CacheProfile)` is the startup line: blocks and token capacity. Tied weights are counted once. |
-| `tinyserve/kv/block_manager.py` | Free list and ref counts. `allocate` appends ids for `num_computed_tokens + num_new_tokens`. `free` and `truncate` drop blocks at ref count 0. A cached block is parked for the prefix cache instead. |
+| `tinyserve/kv/block_manager.py` | Free list and ref counts. `allocate` appends ids for `num_computed_tokens + num_new_tokens`. `free` and `truncate` drop blocks at ref count 0. A cached block is parked for the prefix cache instead. `share` can attach a parked block. |
+| `tinyserve/kv/prefix_cache.py` | Hash chain of full blocks: SHA-256 of the parent hash and the tokens in the block. `match` walks until the first miss and stops before the last prompt token. Unused cached blocks sit on an LRU list. `evict_lru` forgets the oldest so the block manager can reclaim it. |
 | `tinyserve/kernels/kv_store.py` | Reference write of new K/V. `slot_mapping` is `block_id * block_size + offset`. `write_layer_kv` scatters one layer during the forward. `write_kv` does every layer. |
 | `tinyserve/kernels/reference.py` | `gather_paged_kv` rebuilds one sequence in logical order. `paged_attention_flat` accepts a flattened batch and a block table padded with -1. Query length 1 is decode. A longer query sits at the end of a cached prefix. |
 | `bench/datasets.py` | ShareGPT, code (JSON/JSONL), shared-prefix, and synthetic workloads. Length filter, then a hash-ordered subset for a fixed seed. `prompt_token_ids` is what a benchmark must send. |
+| `bench/prefix_cache.py` | Shared-prefix run on Llama-3.2-1B with caching off, then on. Refuses to write if computed prompt tokens do not drop or greedy ids differ. |
 | `bench/offline.py` | `run_offline` runs each sample to a fixed length, drops a separate warmup pass, repeats, and writes one Section 11 JSONL (meta, per-request, summary). Summary percentiles come from the median repeat by output throughput. `request_record` / `write_benchmark_jsonl` are the shared row shape. |
 | `bench/baselines.py` | `run_hf_generate` times Hugging Face `generate` on the same samples. `profile_generation` writes a `torch.profiler` summary of one TinyServe request. The CLI loads one model at a time. |
 | `bench/vllm_offline.py` | Runs the same synthetic set through vLLM's `LLM.generate` (one batched call per repeat) and writes a Section 11 JSONL. Executed with the separate venv, not TinyServe's. |
@@ -135,6 +137,7 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `tests/unit/test_kv_store.py` | Slot formula across a block boundary, and K/V landing on that physical block and offset. |
 | `tests/unit/test_paged_attention.py` | Float32 paged attention matches the contiguous path for decode, a query chunk over a prefix, and a full-block prefill. |
 | `tests/unit/test_model_runner.py` | Slot packing and -1 padding. A paged prefill matches contiguous logits exactly in float32. A later chunk and a mixed prefill/decode batch match within 1e-5. |
+| `tests/unit/test_prefix_cache.py` | A changed parent misses, the block that holds the last prompt token is not reused, LRU eviction, and a second request skips a shared prefix with the same greedy ids. |
 | `tests/unit/test_datasets.py` | Length filtering and fixed-seed subsets for all four workloads, using in-test fixtures. |
 | `tests/unit/test_offline.py` | Section 11 JSONL schema on the tiny model (written under `tmp_path`, not committed) and median-repeat selection. |
 | `tests/unit/test_baselines.py` | Hugging Face `generate` JSONL shape and a profiler summary, both on the tiny model. |
@@ -149,6 +152,7 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `docs/results/phase2/2026-10-06_p2-3-profiler.json` | Script-written profiler table for one TinyServe request of that shape. Self CPU time exceeds self CUDA time. `aten::mm` is most of the device time. |
 | `docs/results/phase2/2026-10-06_p2-4-vllm-offline.jsonl` | Script-written vLLM offline run, same synthetic ids, one batched `generate` per repeat. Median output throughput is the summary line. ITL percentiles are null. Dirty run. |
 | `docs/results/phase2/2026-10-06_p2-5-nsys.json` | Script-written Nsight Systems summary of one naive 1B request (prompt 64, 16 new tokens). Idle fraction is in the summary. Dirty run. No ncu file: counters are blocked on the Windows host. |
+| `docs/results/phase3/2026-10-07_p3-6-prefix-cache.jsonl` | Script-written shared-prefix run on Llama-3.2-1B bf16, four prompts, output length 8, block size 16. Caching off then on. Computed prompt tokens and TTFT percentiles are the summary line. Dirty run. |
 | `tests/gpu/test_env_info_gpu.py` | (`gpu`) GPU fields are populated |
 
 ## 7. Environment and hardware
@@ -211,7 +215,7 @@ Full entries are in `docs/DECISIONS.md`.
 
 ## 12. Next steps
 
-1. P3.6 prefix cache: hash full blocks, reuse them, and evict with LRU. On the shared-prefix workload, computed prompt tokens should drop; measure the TTFT change and commit the result file.
+1. P3.7 memory waste: allocated slots versus used slots, compared with a contiguous max-length allocation. Commit a result file with both numbers.
 2. Human: revoke the HF token that was pasted in chat and replace the `HF_TOKEN` line in `~/.bashrc`. Request Llama 3.1 8B access before the final benchmarks. Allow GPU performance counters in NVIDIA App when an ncu summary is wanted.
 
 ## 13. Change log
@@ -240,3 +244,4 @@ Full entries are in `docs/DECISIONS.md`.
 - 2026-10-06 P3.3: reference KV store writes K and V through `slot_mapping` into the physical block and offset.
 - 2026-10-06 P3.4: reference paged attention gathers block tables into logical order and matches contiguous attention in float32.
 - 2026-10-06 P3.5: the engine runs one request at a time on paged KV. The model runner flattens the step, and logits are computed only at the last token of each sequence.
+- 2026-10-07 P3.6: full prompt blocks stay cached by a parent-hash chain. A later shared-prefix request prefills only the tail. Computed tokens and TTFT are in the phase3 result file.

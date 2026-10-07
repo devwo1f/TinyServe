@@ -22,6 +22,20 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-10-07 | HUMAN (via session) | Gate after Phase 3 passed
+
+Human asked to continue into Phase 4.
+
+## 2026-10-07 | Cursor | Task P4.1
+
+**Status:** done
+**What changed:** `tinyserve/engine/scheduler.py` keeps a waiting queue and a running queue. `schedule` reserves blocks for decodes first, one token each, then spends the leftover `max_num_batched_tokens` on prefill. With chunking on, a prompt is split to the budget and to the free blocks. With chunking off, the whole remaining prompt has to fit or the step takes nothing from that queue. `max_num_seqs` caps how many sequences are in flight. A running chunk continues before a new request is admitted. Decodes that ran move to the back of the running queue so a tight budget still reaches the others. `num_computed_tokens` is not advanced here. `preempted` is empty.
+**Tests:** `tests/unit/test_scheduler.py`. CPU: a decode and a prefill under a budget of 3 are ordered decode-then-chunk and the batch token count is 3; a 10-token prompt with budget 4 runs as 4, 4, 2, then one decode; chunking off leaves a 10-token prompt and the short one behind it waiting; two short prefills share a step; the sequence cap admits one of two; a running chunk is continued before the next wait; three decodes with budget 2 rotate so the third runs on the next step; one free block of 4 caps the chunk at 4 and the next step is empty with no preemption; a full block does not grow a decode and does not preempt; four tokens already computed are not prefilled again. 10 passed. CPU suite: 118 passed, 3 deselected.
+**Results:** none
+**Decisions:** none. Conceptual note in REFERENCES.md.
+**Next step:** P4.2 preemption. When a step cannot allocate, preempt the most recently arrived running sequence, free its blocks, and requeue it. A test that forces block exhaustion still finishes every request.
+**Questions for the human:** none
+
 ## 2026-10-07 | Cursor | Task P3.7
 
 **Status:** done. Phase 3 code is complete. Do not start Phase 4 until the human writes the review-gate line.

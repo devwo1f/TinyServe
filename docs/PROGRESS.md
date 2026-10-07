@@ -22,6 +22,16 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-10-06 | Cursor | Task P3.3
+
+**Status:** done
+**What changed:** `tinyserve/kernels/kv_store.py` writes new K and V into the paged pool. `slot_mapping` turns a logical position into `block_table[p // block_size] * block_size + (p % block_size)`. `write_kv` scatters a flattened batch with those slots. The naive engine still uses the contiguous cache.
+**Tests:** `tests/unit/test_kv_store.py`. CPU: positions 0, 3, and 4 on table `[3, 6]` with block size 4 are slots 12, 15, and 24; a second sequence's position 0 on block 1 is slot 4; those values land on that block and offset and unwritten slots stay zero. A position past the table, a negative position, an out-of-range slot, and a layer mismatch are rejected. 6 passed.
+**Results:** none
+**Decisions:** none
+**Next step:** P3.4 reference paged attention: gather K/V through block tables and match contiguous-cache attention in float32, for query length 1 and for a longer query over a cached prefix.
+**Questions for the human:** none
+
 ## 2026-10-06 | Cursor | Task P3.2
 
 **Status:** done

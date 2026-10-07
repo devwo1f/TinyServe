@@ -22,6 +22,16 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-10-07 | Cursor | Task P3.7
+
+**Status:** done. Phase 3 code is complete. Do not start Phase 4 until the human writes the review-gate line.
+**What changed:** `tinyserve/kv/waste.py` computes the Section 10 fraction. Paged slots are the live block tables times the block size. Contiguous slots charge `max_len` for every live sequence, which is the reservation a dense cache makes at the serving limit (`model.max_model_len`, 4096). The engine records one sample after each step when `record_kv_waste` is set, before the blocks are freed. `bench/kv_waste.py` runs eight variable-length requests on the tiny model and also asks the block manager to hold every finished length at once.
+**Tests:** `tests/unit/test_kv_waste.py`. CPU: 15/16/17 tokens allocate 16/16/32 slots; a short block table is rejected; two live sequences of 6 and 4 tokens with block size 4 use 10 slots, hold 12 paged slots, and are charged 32 contiguous slots; engine steps for a 5-token prompt plus 2 output tokens match the block-manager walk (used 5, 6, 7, paged 8). Recording stays empty unless asked. CPU suite: 108 passed, 3 deselected.
+**Results:** `docs/results/phase3/2026-10-07_p3-7-kv-waste.jsonl`. 80 steps. One-at-a-time paged waste p50 0.05610119047619048, p90 0.37812500000000027, p99 0.8881249999999996. Contiguous waste p50 0.9754638671875, p90 0.99560546875, p99 0.99956298828125. Concurrent at full length: used 516, paged allocated 576, contiguous allocated 32768, paged waste 0.10416666666666667, contiguous waste 0.9842529296875. The run was dirty (measured `39ddfe3` plus this diff). Slot counts do not depend on the weights; the tiny model is there so the rows come from the engine step loop.
+**Decisions:** none. Conceptual note in REFERENCES.md.
+**Next step:** Human review gate for Phase 3 (block tables, slot mapping, why paging reduces unused KV, prefix hashing). Then P4.1 scheduler. Do not start Phase 4 before the gate line is in this file.
+**Questions for the human:** confirm the Phase 3 gate when you can explain block tables, slot mapping, the waste difference, and prefix hashing without notes.
+
 ## 2026-10-07 | Cursor | Task P3.6
 
 **Status:** done

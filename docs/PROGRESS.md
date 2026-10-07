@@ -22,6 +22,16 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-10-06 | Cursor | Task P3.4
+
+**Status:** done
+**What changed:** `tinyserve/kernels/reference.py` gathers K and V through each sequence's block table, trims the unused tail of the last block, and runs the same three SDPA cases as the contiguous `Attention` module. Query length 1 is a decode step. A longer query is the end of a cached prefix. The naive engine still uses the contiguous cache.
+**Tests:** `tests/unit/test_paged_attention.py`. CPU float32: a one-token decode of contexts 17 and 6 on scrambled block tables matches contiguous attention exactly; a query of length 3 over a 13-token context matches, and changing the last key does not change the first query row; an 8-token prefill that fills two blocks matches. A short block table is rejected. 4 passed.
+**Results:** none
+**Decisions:** none
+**Next step:** P3.5 switch the model to paged KV. The model runner builds flattened inputs and attention metadata (spec Section 9). Existing parity tests still have to pass.
+**Questions for the human:** none
+
 ## 2026-10-06 | Cursor | Task P3.3
 
 **Status:** done

@@ -33,3 +33,4 @@ Links for AdaSpec and Nightjar are added when the papers are read.
 | Date | Task | Source | What was borrowed (conceptually) |
 |---|---|---|---|
 | 2026-09-29 | P1.2 | Llama 3 RoPE scaling, as documented in the checkpoint config and checked against `transformers` | Long wavelengths are divided by `factor`, short wavelengths are unchanged, and the band between `low_freq_factor` and `high_freq_factor` is blended. No code was copied. |
+| 2026-10-07 | P3.6 | vLLM automatic prefix caching, described in the PagedAttention line of work and the vLLM docs (https://docs.vllm.ai/en/latest/features/automatic_prefix_caching/) | A full block's identity is a hash of the parent block's hash and the token ids in the block. Unused cached blocks are evicted LRU. No code was copied. |

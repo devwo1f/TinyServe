@@ -3,9 +3,8 @@
 The cache tensor is one pool. This module hands out block ids, remembers how
 many sequences still need each block, and takes a block back when the last
 user lets go. Prefix caching (P3.6) will call `share` for a reused full block
-and `reclaim` when an unreferenced cached block is evicted. Until then a
-block at ref count 0 returns to the free list, unless the caller says it is
-cached.
+and `reclaim` when an unreferenced cached block is evicted. A block at
+ref count 0 returns to the free list, unless the caller says it is cached.
 """
 
 from __future__ import annotations
@@ -80,13 +79,17 @@ class BlockManager:
             seq.block_table.append(self._take_free())
 
     def share(self, seq: Sequence, block_id: int) -> None:
-        """A second sequence reuses `block_id` instead of taking a free one.
+        """A sequence reuses `block_id` instead of taking a fresh one.
 
         The block stays out of the free list until every sequence that holds
-        it has freed or truncated it.
+        it has freed or truncated it. A cached block may have ref count 0
+        while it waits on the prefix-cache LRU; sharing that block brings
+        the count back to 1. A block on the free list is not cached KV.
         """
         self._check_id(block_id)
-        if self._ref_count[block_id] <= 0:
+        if block_id in self._free_ids:
+            raise ValueError("cannot share a free block")
+        if self._ref_count[block_id] <= 0 and not self._is_cached(block_id):
             raise ValueError("cannot share a free block")
         if block_id in seq.block_table:
             raise ValueError("sequence already holds this block")

@@ -43,3 +43,4 @@ Confirm a gate by adding `## <YYYY-MM-DD> | HUMAN | Gate after Phase <n> passed`
 | [p2-4-vllm.md](p2-4-vllm.md) | vLLM offline baseline and why its token rate is not a kernel-only comparison |
 | [p2-5-profiling.md](p2-5-profiling.md) | Nsight timelines, GPU idle gaps, and why ncu needs a Windows setting |
 | [p3-1-kv-cache.md](p3-1-kv-cache.md) | Paged KV layout and how many blocks fit after weights and activations |
+| [p3-2-block-manager.md](p3-2-block-manager.md) | Free list, reference counts, and why a partial block is not a new block |

@@ -22,6 +22,16 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-10-06 | Cursor | Task P3.2
+
+**Status:** done
+**What changed:** `tinyserve/kv/block_manager.py` loans block ids from a free list. `allocate` appends enough ids for `num_computed_tokens + num_new_tokens` and does not mark those tokens computed. `free` and `truncate` decrement ref counts; a block returns to the free list only at zero. `share` is how a second sequence holds the same block. A block the caller marks cached is parked instead, and `reclaim` is the way back. The naive engine still uses the contiguous cache.
+**Tests:** `tests/unit/test_block_manager.py`. CPU: 15/16/17 tokens take 1/1/2 blocks, a full block plus one token appends a block, a partial block absorbs one more token, exhaustion allocates nothing, a second `free` is a no-op, a shared block survives `free` and `truncate`, truncate to 0/15/16/17 keeps the right prefix, and a cached block is parked until `reclaim`. 10 passed.
+**Results:** none
+**Decisions:** none
+**Next step:** P3.3 KV store: write new K/V into the paged cache through `slot_mapping`. Test that values land in the correct block and offset.
+**Questions for the human:** none
+
 ## 2026-10-06 | Cursor | Task P3.1
 
 **Status:** done

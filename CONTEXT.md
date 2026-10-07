@@ -22,8 +22,8 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 ## 2. Current status
 
 - **Phase:** 3 (Paged KV cache)
-- **Last completed task:** P3.1 KV cache allocation and memory profiling
-- **In progress:** P3.2 block manager. Dev environment is WSL2 (D-007). Llama 3.2 access is approved and `Llama-3.2-1B-Instruct` is downloaded locally. Human asked to start Phase 3 on 2026-10-06. Nsight Compute counters are still blocked on the Windows host; that does not block paging.
+- **Last completed task:** P3.2 block manager
+- **In progress:** P3.3 KV store (write K/V through `slot_mapping`). Dev environment is WSL2 (D-007). Llama 3.2 access is approved and `Llama-3.2-1B-Instruct` is downloaded locally. Human asked to start Phase 3 on 2026-10-06. Nsight Compute counters are still blocked on the Windows host; that does not block paging.
 - **Working copy:** `~/TinyServe` inside WSL2 Ubuntu 24.04 (user `abhay`), opened in Cursor via the WSL remote. Do not develop in the old `D:\Projects\TinyServe` Windows copy.
 - **Review gates passed:** Phase 0, Phase 1, and Phase 2 (human asked to start the next phase)
 - **GitHub:** https://github.com/devwo1f/TinyServe (public)
@@ -35,7 +35,7 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 | 0 | Skeleton, docs, env scripts, config, CI | done (human asked to start Phase 1) |
 | 1 | From-scratch Llama (RoPE w/ Llama 3 scaling, GQA, SwiGLU), safetensors loading, sampler, naive engine, HF parity | done (human asked to start Phase 2) |
 | 2 | Benchmark + profiling harness, HF and vLLM baselines | done (human asked to start Phase 3; ncu counters still blocked on the Windows host) |
-| 3 | Paged KV cache, block manager, KV store, reference paged attention, prefix cache | in progress (P3.1 done) |
+| 3 | Paged KV cache, block manager, KV store, reference paged attention, prefix cache | in progress (P3.2 done) |
 | 4 | Continuous batching scheduler, chunked prefill, preemption, engine step loop | not started |
 | 5 | Triton kernels: fused add+RMSNorm, RoPE, paged decode attention (split-K and prefill are stretch) | not started |
 | 6 | CUDA graphs for decode | not started |
@@ -105,6 +105,7 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `tinyserve/engine/sampler.py` | `sample_token`: temperature, then top-k, then top-p. A per-request `torch.Generator` keeps seeds from sharing the global RNG. |
 | `tinyserve/engine/engine.py` | `Engine.generate(prompts, sampling_params)` runs one request at a time on a fresh `ContiguousKVCache`. Stop ids are not emitted. `generate_tokens` is the same loop for callers who already have ids. `GenerationResult` carries `ttft_s`, `e2e_s`, and `itl_s`, taken after the logits for that token are ready. The cache write after the last token is outside those times. |
 | `tinyserve/kv/cache.py` | Paged K/V tensors and the startup block count. Budget is `total * utilization - weights - peak activations - safety margin`. `str(CacheProfile)` is the startup line: blocks and token capacity. Tied weights are counted once. |
+| `tinyserve/kv/block_manager.py` | Free list and ref counts. `allocate` appends ids for `num_computed_tokens + num_new_tokens`. `free` and `truncate` drop blocks at ref count 0. A cached block is parked for the prefix cache instead. |
 | `bench/datasets.py` | ShareGPT, code (JSON/JSONL), shared-prefix, and synthetic workloads. Length filter, then a hash-ordered subset for a fixed seed. `prompt_token_ids` is what a benchmark must send. |
 | `bench/offline.py` | `run_offline` runs each sample to a fixed length, drops a separate warmup pass, repeats, and writes one Section 11 JSONL (meta, per-request, summary). Summary percentiles come from the median repeat by output throughput. `request_record` / `write_benchmark_jsonl` are the shared row shape. |
 | `bench/baselines.py` | `run_hf_generate` times Hugging Face `generate` on the same samples. `profile_generation` writes a `torch.profiler` summary of one TinyServe request. The CLI loads one model at a time. |
@@ -127,6 +128,7 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `tests/unit/test_sampler.py` | Greedy, top-k, top-p, a repeated seed that ignores the global RNG, and a two-row greedy batch. |
 | `tests/unit/test_engine.py` | One-at-a-time generation: greedy token ids match Hugging Face exactly on the tiny model, stop ids are excluded, a seed repeats. |
 | `tests/unit/test_kv_cache.py` | Fake-memory block counts, the spec's 8B byte-per-token figure, tied-weight dedup, and paged tensor shapes. |
+| `tests/unit/test_block_manager.py` | Block boundaries at 15/16/17 tokens, exhaustion, shared ref counts, truncate, and parking a cached block. |
 | `tests/unit/test_datasets.py` | Length filtering and fixed-seed subsets for all four workloads, using in-test fixtures. |
 | `tests/unit/test_offline.py` | Section 11 JSONL schema on the tiny model (written under `tmp_path`, not committed) and median-repeat selection. |
 | `tests/unit/test_baselines.py` | Hugging Face `generate` JSONL shape and a profiler summary, both on the tiny model. |
@@ -203,7 +205,7 @@ Full entries are in `docs/DECISIONS.md`.
 
 ## 12. Next steps
 
-1. P3.2 block manager: allocate, free, reference counts, truncate. Unit tests for exhaustion, exact block boundaries, and truncate.
+1. P3.3 KV store: write new K/V into the paged cache through `slot_mapping`, with a test that values land in the right block and offset.
 2. Human: revoke the HF token that was pasted in chat and replace the `HF_TOKEN` line in `~/.bashrc`. Request Llama 3.1 8B access before the final benchmarks. Allow GPU performance counters in NVIDIA App when an ncu summary is wanted.
 
 ## 13. Change log
@@ -228,3 +230,4 @@ Full entries are in `docs/DECISIONS.md`.
 - 2026-10-06 P2.4: vLLM 0.31.0 in its own venv, batched offline result on the same synthetic 1B requests. Commands are in `bench/vllm_baseline.md`.
 - 2026-10-06 P2.5: Nsight Systems and Nsight Compute wrappers. The nsys summary of one naive 1B request is in the phase2 result file. ncu is blocked on Windows GPU performance counters.
 - 2026-10-06 P3.1: paged KV tensors and startup block count from a fake-memory budget. Human asked to start Phase 3.
+- 2026-10-06 P3.2: block manager with a free list, ref counts, and truncate. A cached block is parked instead of freed.

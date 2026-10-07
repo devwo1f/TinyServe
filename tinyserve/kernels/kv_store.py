@@ -37,6 +37,42 @@ def slot_mapping(block_table: list[int], positions: torch.Tensor, block_size: in
     return block_id * block_size + offset  # [num_tokens]
 
 
+def write_layer_kv(
+    k_cache: torch.Tensor,
+    v_cache: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    slots: torch.Tensor,
+) -> None:
+    """Scatter one layer of a flattened batch into that layer's pages.
+
+    The forward writes a layer as soon as its K and V exist, because the next
+    layer needs the attention output. ``k_cache`` is
+    ``[num_blocks, block_size, num_kv_heads, head_dim]`` and ``key`` is
+    ``[num_tokens, num_kv_heads, head_dim]``.
+    """
+    if k_cache.shape != v_cache.shape:
+        raise ValueError("K and V caches differ")
+    if key.shape != value.shape:
+        raise ValueError("key and value shapes differ")
+    if key.ndim != 3 or k_cache.ndim != 4:
+        raise ValueError("key must be [num_tokens, num_kv_heads, head_dim]")
+    num_tokens, num_kv_heads, head_dim = key.shape
+    if k_cache.shape[-2:] != (num_kv_heads, head_dim):
+        raise ValueError("key heads do not match the cache")
+    if slots.shape != (num_tokens,):
+        raise ValueError("slots must be [num_tokens]")
+    if num_tokens == 0:
+        return
+    nslots = k_cache.shape[0] * k_cache.shape[1]
+    if int(slots.min()) < 0 or int(slots.max()) >= nslots:
+        raise IndexError("slot is outside the paged cache")
+    flat_k = k_cache.view(-1, num_kv_heads, head_dim)  # [num_blocks * block_size, Nk, D]
+    flat_v = v_cache.view(-1, num_kv_heads, head_dim)
+    flat_k[slots] = key
+    flat_v[slots] = value
+
+
 def write_kv(
     cache: PagedKVCache,
     key: torch.Tensor,
@@ -63,12 +99,5 @@ def write_kv(
         raise ValueError("slots must be [num_tokens]")
     if num_tokens == 0:
         return
-    nslots = cache.num_blocks * cache.block_size
-    if int(slots.min()) < 0 or int(slots.max()) >= nslots:
-        raise IndexError("slot is outside the paged cache")
     for layer in range(num_layers):
-        # [num_blocks * block_size, num_kv_heads, head_dim]
-        flat_k = cache.k[layer].view(-1, num_kv_heads, head_dim)
-        flat_v = cache.v[layer].view(-1, num_kv_heads, head_dim)
-        flat_k[slots] = key[layer]
-        flat_v[slots] = value[layer]
+        write_layer_kv(cache.k[layer], cache.v[layer], key[layer], value[layer], slots)

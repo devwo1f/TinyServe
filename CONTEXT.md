@@ -22,8 +22,8 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 ## 2. Current status
 
 - **Phase:** 3 (Paged KV cache)
-- **Last completed task:** P3.4 reference paged attention
-- **In progress:** P3.5 switch the model to paged KV. Dev environment is WSL2 (D-007). Llama 3.2 access is approved and `Llama-3.2-1B-Instruct` is downloaded locally. Human asked to start Phase 3 on 2026-10-06. Nsight Compute counters are still blocked on the Windows host; that does not block paging.
+- **Last completed task:** P3.5 paged model runner
+- **In progress:** P3.6 prefix cache. Dev environment is WSL2 (D-007). Llama 3.2 access is approved and `Llama-3.2-1B-Instruct` is downloaded locally. Human asked to start Phase 3 on 2026-10-06. Nsight Compute counters are still blocked on the Windows host; that does not block paging.
 - **Working copy:** `~/TinyServe` inside WSL2 Ubuntu 24.04 (user `abhay`), opened in Cursor via the WSL remote. Do not develop in the old `D:\Projects\TinyServe` Windows copy.
 - **Review gates passed:** Phase 0, Phase 1, and Phase 2 (human asked to start the next phase)
 - **GitHub:** https://github.com/devwo1f/TinyServe (public)
@@ -35,7 +35,7 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 | 0 | Skeleton, docs, env scripts, config, CI | done (human asked to start Phase 1) |
 | 1 | From-scratch Llama (RoPE w/ Llama 3 scaling, GQA, SwiGLU), safetensors loading, sampler, naive engine, HF parity | done (human asked to start Phase 2) |
 | 2 | Benchmark + profiling harness, HF and vLLM baselines | done (human asked to start Phase 3; ncu counters still blocked on the Windows host) |
-| 3 | Paged KV cache, block manager, KV store, reference paged attention, prefix cache | in progress (P3.4 done) |
+| 3 | Paged KV cache, block manager, KV store, reference paged attention, prefix cache | in progress (P3.5 done) |
 | 4 | Continuous batching scheduler, chunked prefill, preemption, engine step loop | not started |
 | 5 | Triton kernels: fused add+RMSNorm, RoPE, paged decode attention (split-K and prefill are stretch) | not started |
 | 6 | CUDA graphs for decode | not started |
@@ -98,16 +98,17 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `tinyserve/` | Main package. `__init__.py` holds `__version__`. Subpackages: `model/`, `kv/`, `engine/`, `kernels/`, `spec/`, `quant/`, `server/`. Module files from spec Section 8 are created by the task that implements them. |
 | `tinyserve/model/tokenizer.py` | `Tokenizer` wraps HF: `from_pretrained`, `encode` (no special tokens by default), `decode`, `apply_chat_template`, `eos_token_id` (`<\|eot_id\|>` for Llama 3 Instruct), `bos_token_id`. `IncrementalDetokenizer.add` decodes the full id list and holds back a trailing U+FFFD so a character split across tokens is not streamed as a replacement box. `finish` flushes the tail. |
 | `tinyserve/model/rope.py` | `compute_inv_freq` (`[head_dim/2]`), Llama 3 wavelength scaling via `RopeScaling`, `rotary_cos_sin` (`[batch, seq, head_dim]`), `apply_rotary`. Checked against HF within 1e-5, including positions past 8192. |
-| `tinyserve/model/llama.py` | `LlamaModelConfig`, `RMSNorm` (variance in fp32), `Attention` (GQA, SDPA), `MLP` (SwiGLU), `DecoderLayer`, `LlamaModel`, `LlamaForCausalLM`. `ContiguousKVCache` is `[num_layers, batch, max_len, num_kv_heads, head_dim]`. Parameter names match HF. Tied embeddings share `lm_head.weight` with `embed_tokens.weight`. A single new token uses unmasked SDPA (it can see the whole cache). A longer query that is still shorter than the cache uses an explicit causal mask, because `is_causal=True` on this PyTorch does not align a short query to the end of a longer cache. |
+| `tinyserve/model/llama.py` | `LlamaModelConfig`, `RMSNorm` (variance in fp32), `Attention` (GQA, SDPA), `MLP` (SwiGLU), `DecoderLayer`, `LlamaModel`, `LlamaForCausalLM`. `ContiguousKVCache` is `[num_layers, batch, max_len, num_kv_heads, head_dim]` and remains the dense reference. `forward_paged` runs a flattened batch: it writes each layer's K/V into `PagedKVCache`, attends with the block table, and returns logits only at `logits_indices`. Parameter names match HF. Tied embeddings share `lm_head.weight` with `embed_tokens.weight`. A single new token uses unmasked SDPA. A longer query that is still shorter than the cache uses an explicit causal mask, because `is_causal=True` on this PyTorch does not align a short query to the end of a longer cache. |
 | `tinyserve/model/weights.py` | `load_hf_weights` reads safetensors straight onto the target device and dtype. Names already match HF. A missing `lm_head.weight` is allowed only when embeddings are tied. |
 | `tinyserve/config.py` | Torch-free settings. `TinyServeConfig` has sections `model` (model path, tokenizer, dtype `auto`/float32/float16/bfloat16, device, max_model_len, seed), `cache` (block_size 16, gpu_memory_utilization 0.9, memory_safety_margin_gib, num_gpu_blocks_override, enable_prefix_caching), `scheduler` (max_num_batched_tokens 2048, max_num_seqs 64, enable_chunked_prefill), `speculative` (enabled, draft_model, num_speculative_tokens, policy, batch_threshold), `server` (host, port, admission_policy fifo/reject/deadline, TTFT/TPOT SLOs), `benchmark` (workload, num_requests, request_rate, warmup, repeats, seed, ignore_eos, output_dir). API: `apply_overrides(cfg, {"cache.block_size": "32"})`, `add_config_args(parser)` adds `--section.field` flags, `config_from_args(args)`, `cfg.to_dict()` |
 | `tinyserve/engine/sequence.py` | `SamplingParams` (temperature 0 is greedy, top-k -1 is off), `SequenceStatus`, and `Sequence` with the spec Section 9 fields. |
 | `tinyserve/engine/sampler.py` | `sample_token`: temperature, then top-k, then top-p. A per-request `torch.Generator` keeps seeds from sharing the global RNG. |
-| `tinyserve/engine/engine.py` | `Engine.generate(prompts, sampling_params)` runs one request at a time on a fresh `ContiguousKVCache`. Stop ids are not emitted. `generate_tokens` is the same loop for callers who already have ids. `GenerationResult` carries `ttft_s`, `e2e_s`, and `itl_s`, taken after the logits for that token are ready. The cache write after the last token is outside those times. |
+| `tinyserve/engine/engine.py` | `Engine.generate(prompts, sampling_params)` runs one request at a time on a fresh paged pool sized for that request. Stop ids are not emitted. `generate_tokens` is the same loop for callers who already have ids. `GenerationResult` carries `ttft_s`, `e2e_s`, and `itl_s`, taken after the logits for that token are ready. The cache write after the last token is outside those times. |
+| `tinyserve/engine/model_runner.py` | `prepare_model_input` flattens the new tokens into `input_ids`, `positions`, `slot_mapping`, `query_start_loc`, `seq_lens`, `block_tables` (padded with -1), and `logits_indices`. `run_paged` calls `forward_paged`. `num_computed_tokens` advances only after the forward. |
 | `tinyserve/kv/cache.py` | Paged K/V tensors and the startup block count. Budget is `total * utilization - weights - peak activations - safety margin`. `str(CacheProfile)` is the startup line: blocks and token capacity. Tied weights are counted once. |
 | `tinyserve/kv/block_manager.py` | Free list and ref counts. `allocate` appends ids for `num_computed_tokens + num_new_tokens`. `free` and `truncate` drop blocks at ref count 0. A cached block is parked for the prefix cache instead. |
-| `tinyserve/kernels/kv_store.py` | Reference write of new K/V. `slot_mapping` is `block_id * block_size + offset`. `write_kv` scatters `[num_layers, num_tokens, num_kv_heads, head_dim]` into the pool. The naive engine still uses the contiguous cache. |
-| `tinyserve/kernels/reference.py` | `gather_paged_kv` rebuilds one sequence in logical order. `paged_attention` then runs the same three SDPA cases as `Attention.forward`. Query length 1 is decode. A longer query sits at the end of a cached prefix. |
+| `tinyserve/kernels/kv_store.py` | Reference write of new K/V. `slot_mapping` is `block_id * block_size + offset`. `write_layer_kv` scatters one layer during the forward. `write_kv` does every layer. |
+| `tinyserve/kernels/reference.py` | `gather_paged_kv` rebuilds one sequence in logical order. `paged_attention_flat` accepts a flattened batch and a block table padded with -1. Query length 1 is decode. A longer query sits at the end of a cached prefix. |
 | `bench/datasets.py` | ShareGPT, code (JSON/JSONL), shared-prefix, and synthetic workloads. Length filter, then a hash-ordered subset for a fixed seed. `prompt_token_ids` is what a benchmark must send. |
 | `bench/offline.py` | `run_offline` runs each sample to a fixed length, drops a separate warmup pass, repeats, and writes one Section 11 JSONL (meta, per-request, summary). Summary percentiles come from the median repeat by output throughput. `request_record` / `write_benchmark_jsonl` are the shared row shape. |
 | `bench/baselines.py` | `run_hf_generate` times Hugging Face `generate` on the same samples. `profile_generation` writes a `torch.profiler` summary of one TinyServe request. The CLI loads one model at a time. |
@@ -133,6 +134,7 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `tests/unit/test_block_manager.py` | Block boundaries at 15/16/17 tokens, exhaustion, shared ref counts, truncate, and parking a cached block. |
 | `tests/unit/test_kv_store.py` | Slot formula across a block boundary, and K/V landing on that physical block and offset. |
 | `tests/unit/test_paged_attention.py` | Float32 paged attention matches the contiguous path for decode, a query chunk over a prefix, and a full-block prefill. |
+| `tests/unit/test_model_runner.py` | Slot packing and -1 padding. A paged prefill matches contiguous logits exactly in float32. A later chunk and a mixed prefill/decode batch match within 1e-5. |
 | `tests/unit/test_datasets.py` | Length filtering and fixed-seed subsets for all four workloads, using in-test fixtures. |
 | `tests/unit/test_offline.py` | Section 11 JSONL schema on the tiny model (written under `tmp_path`, not committed) and median-repeat selection. |
 | `tests/unit/test_baselines.py` | Hugging Face `generate` JSONL shape and a profiler summary, both on the tiny model. |
@@ -209,7 +211,7 @@ Full entries are in `docs/DECISIONS.md`.
 
 ## 12. Next steps
 
-1. P3.5 switch the model to paged KV. The model runner builds flattened inputs and attention metadata (spec Section 9). Existing parity tests still have to pass.
+1. P3.6 prefix cache: hash full blocks, reuse them, and evict with LRU. On the shared-prefix workload, computed prompt tokens should drop; measure the TTFT change and commit the result file.
 2. Human: revoke the HF token that was pasted in chat and replace the `HF_TOKEN` line in `~/.bashrc`. Request Llama 3.1 8B access before the final benchmarks. Allow GPU performance counters in NVIDIA App when an ncu summary is wanted.
 
 ## 13. Change log
@@ -237,3 +239,4 @@ Full entries are in `docs/DECISIONS.md`.
 - 2026-10-06 P3.2: block manager with a free list, ref counts, and truncate. A cached block is parked instead of freed.
 - 2026-10-06 P3.3: reference KV store writes K and V through `slot_mapping` into the physical block and offset.
 - 2026-10-06 P3.4: reference paged attention gathers block tables into logical order and matches contiguous attention in float32.
+- 2026-10-06 P3.5: the engine runs one request at a time on paged KV. The model runner flattens the step, and logits are computed only at the last token of each sequence.

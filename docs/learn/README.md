@@ -46,3 +46,4 @@ Confirm a gate by adding `## <YYYY-MM-DD> | HUMAN | Gate after Phase <n> passed`
 | [p3-2-block-manager.md](p3-2-block-manager.md) | Free list, reference counts, and why a partial block is not a new block |
 | [p3-3-kv-store.md](p3-3-kv-store.md) | Slot mapping and writing K/V into the physical block and offset |
 | [p3-4-paged-attention.md](p3-4-paged-attention.md) | Gather pages into logical order, then the same attention as the contiguous cache |
+| [p3-5-paged-model.md](p3-5-paged-model.md) | Flattened batch metadata and running the model on paged KV |

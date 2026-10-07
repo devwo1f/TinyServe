@@ -22,6 +22,16 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-10-06 | Cursor | Task P3.5
+
+**Status:** done
+**What changed:** `tinyserve/engine/model_runner.py` packs a step into flattened ids, positions, slots, and attention metadata. Block tables are padded with -1. `LlamaForCausalLM.forward_paged` writes each layer into the paged cache and returns logits only at `logits_indices`. `Engine.generate` uses that path, one request at a time, on a pool sized for the request. The contiguous forward remains for the dense reference.
+**Tests:** `tests/unit/test_model_runner.py`. CPU: slots and the -1 pad match the spec formula; a 7-token paged prefill matches the contiguous logits exactly in float32; a 3-token prefix plus a 4-token chunk, and a mixed prefill/decode batch, match within 1e-5. Existing engine, llama, and KV tests still pass. GPU: `tests/gpu/test_engine_generate.py` matched Hugging Face greedy tokens on Llama-3.2-1B. The committed phase1 result file was not changed.
+**Results:** none
+**Decisions:** none
+**Next step:** P3.6 prefix cache: hash full blocks, reuse them, and evict with LRU. On the shared-prefix workload, computed prompt tokens should drop; measure the TTFT change and commit the result file.
+**Questions for the human:** none
+
 ## 2026-10-06 | Cursor | Task P3.4
 
 **Status:** done

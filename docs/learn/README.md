@@ -48,3 +48,4 @@ Confirm a gate by adding `## <YYYY-MM-DD> | HUMAN | Gate after Phase <n> passed`
 | [p3-4-paged-attention.md](p3-4-paged-attention.md) | Gather pages into logical order, then the same attention as the contiguous cache |
 | [p3-5-paged-model.md](p3-5-paged-model.md) | Flattened batch metadata and running the model on paged KV |
 | [p3-6-prefix-cache.md](p3-6-prefix-cache.md) | Reusing full KV blocks by a hash of the prefix |
+| [p3-7-kv-waste.md](p3-7-kv-waste.md) | Paged slots versus a contiguous reservation of the serving max length |

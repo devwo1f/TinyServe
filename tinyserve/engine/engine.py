@@ -18,6 +18,7 @@ from tinyserve.engine.sequence import SamplingParams, Sequence, SequenceStatus
 from tinyserve.kv.block_manager import BlockManager, blocks_for_tokens
 from tinyserve.kv.cache import PagedKVCache
 from tinyserve.kv.prefix_cache import PrefixCache
+from tinyserve.kv.waste import SlotSample, sample_slots
 from tinyserve.model.llama import LlamaForCausalLM
 from tinyserve.model.tokenizer import Tokenizer
 
@@ -43,6 +44,9 @@ class GenerationResult:
     ttft_s: float | None = None
     e2e_s: float = 0.0
     itl_s: list[float] | None = None
+    # One entry per model step when recording is on. Empty otherwise.
+    # Captured before free() clears the block table.
+    slot_samples: tuple[SlotSample, ...] = ()
 
 
 class Engine:
@@ -51,7 +55,9 @@ class Engine:
     ``generate`` is the spec's offline API. ``generate_tokens`` is the same
     loop for callers who already have ids (a chat template, or a test).
     ``block_size`` is the page size. The default matches ``CacheConfig``.
-    Prefix caching is on by default for the same reason.
+    Prefix caching is on by default for the same reason. ``record_kv_waste``
+    keeps a slot sample after every step. ``contiguous_max_len`` is the dense
+    reservation those samples charge; it defaults to the model's context.
     """
 
     def __init__(
@@ -60,13 +66,19 @@ class Engine:
         tokenizer: Tokenizer,
         block_size: int = 16,
         enable_prefix_caching: bool = True,
+        record_kv_waste: bool = False,
+        contiguous_max_len: int | None = None,
     ):
         if block_size < 1:
             raise ValueError("block_size must be positive")
+        if contiguous_max_len is not None and contiguous_max_len < 1:
+            raise ValueError("contiguous_max_len must be positive")
         self.model = model
         self.tokenizer = tokenizer
         self.block_size = block_size
         self.enable_prefix_caching = enable_prefix_caching
+        self.record_kv_waste = record_kv_waste
+        self.contiguous_max_len = contiguous_max_len
         self._next_seq_id = 0
         self._prefix: PrefixCache | None = None
         self._manager: BlockManager | None = None
@@ -155,6 +167,25 @@ class Engine:
             self._manager.reclaim(evicted)
         self._manager.allocate(sequence, num_new_tokens)
 
+    def _slot_sample(self, sequence: Sequence) -> SlotSample | None:
+        """One waste sample for the sequences live on this step.
+
+        Called after ``num_computed_tokens`` moves and before ``free`` clears
+        the table. The contiguous side charges ``max_len`` for each live
+        sequence, which is what a dense cache holds for the whole request.
+        """
+        if not self.record_kv_waste:
+            return None
+        max_len = self.contiguous_max_len
+        if max_len is None:
+            max_len = self.model.config.max_position_embeddings
+        return sample_slots(
+            [list(sequence.block_table)],
+            [sequence.num_computed_tokens],
+            block_size=self.block_size,
+            max_len=max_len,
+        )
+
     def _run_one(self, prompt_ids: list[int], params: SamplingParams) -> GenerationResult:
         """Prefill the uncached tail of `prompt_ids`, then sample up to `max_tokens`."""
         if not prompt_ids:
@@ -185,6 +216,7 @@ class Engine:
         self._next_seq_id += 1
         cached = self._take_cached_prefix(sequence, prompt_ids)
         remaining = len(prompt_ids) - cached
+        samples: list[SlotSample] = []
         self._reserve(sequence, remaining)
         generator = _request_generator(params, device)
         stop_ids = set(params.stop_token_ids)
@@ -196,6 +228,9 @@ class Engine:
         prefill = prepare_model_input([sequence], [remaining], block_size, device)
         logits = run_paged(self.model, cache, prefill)  # [1, vocab]
         sequence.num_computed_tokens = len(prompt_ids)
+        noted = self._slot_sample(sequence)
+        if noted is not None:
+            samples.append(noted)
         _sync(device)
         next_logits = logits[0]  # [vocab]
         token_times: list[float] = []
@@ -213,6 +248,9 @@ class Engine:
             step = prepare_model_input([sequence], [1], block_size, device)
             next_logits = run_paged(self.model, cache, step)[0]  # [vocab]
             sequence.num_computed_tokens += 1
+            noted = self._slot_sample(sequence)
+            if noted is not None:
+                samples.append(noted)
             _sync(device)
         sequence.status = SequenceStatus.FINISHED
         if self._prefix is not None:
@@ -231,6 +269,7 @@ class Engine:
             ttft_s=ttft,
             e2e_s=e2e,
             itl_s=itl,
+            slot_samples=tuple(samples),
         )
 
 

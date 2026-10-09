@@ -22,6 +22,16 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-10-09 | Cursor | Task P4.2
+
+**Status:** done
+**What changed:** `Scheduler.schedule` preempts when the free list cannot hold the next token. The victim is the newest running request that this step has not already reserved blocks for. Its blocks are freed, `num_computed_tokens` goes back to 0, and it returns to the waiting queue with status `PREEMPTED`. Tokens it already generated stay on the sequence, and the next prefill runs the prompt and those tokens again. A request that is the only one running is not preempted. `ScheduledBatch.preempted` lists who lost KV this step.
+**Tests:** `tests/unit/test_scheduler.py`. CPU: two sequences fill a 2-block pool; the older one needs another block and the newer one is preempted, with its output token kept and its block table cleared. A pool of 2 blocks of size 4 still finishes two requests (prompt 4, 4 new tokens each) with the same token ids as a pool of 8 blocks. The lone-request cases still do not preempt. 12 passed. CPU suite: 120 passed, 3 deselected.
+**Results:** none
+**Decisions:** none. Conceptual note in REFERENCES.md.
+**Next step:** P4.3 engine step loop. `step` schedules, runs, samples, updates, and frees finished sequences. Batched greedy outputs must match one-at-a-time outputs.
+**Questions for the human:** none
+
 ## 2026-10-07 | HUMAN (via session) | Gate after Phase 3 passed
 
 Human asked to continue into Phase 4.

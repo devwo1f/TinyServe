@@ -22,8 +22,8 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 ## 2. Current status
 
 - **Phase:** 4 (Continuous batching)
-- **Last completed task:** P4.1 scheduler
-- **In progress:** P4.2 preemption. Dev environment is WSL2 (D-007). Llama 3.2 access is approved and `Llama-3.2-1B-Instruct` is downloaded locally. Human asked to start Phase 4 on 2026-10-07. Nsight Compute counters are still blocked on the Windows host.
+- **Last completed task:** P4.2 preemption
+- **In progress:** P4.3 engine step loop. Dev environment is WSL2 (D-007). Llama 3.2 access is approved and `Llama-3.2-1B-Instruct` is downloaded locally. Human asked to start Phase 4 on 2026-10-07. Nsight Compute counters are still blocked on the Windows host.
 - **Working copy:** `~/TinyServe` inside WSL2 Ubuntu 24.04 (user `abhay`), opened in Cursor via the WSL remote. Do not develop in the old `D:\Projects\TinyServe` Windows copy.
 - **Review gates passed:** Phase 0, Phase 1, Phase 2, and Phase 3 (human asked to start the next phase)
 - **GitHub:** https://github.com/devwo1f/TinyServe (public)
@@ -36,7 +36,7 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 | 1 | From-scratch Llama (RoPE w/ Llama 3 scaling, GQA, SwiGLU), safetensors loading, sampler, naive engine, HF parity | done (human asked to start Phase 2) |
 | 2 | Benchmark + profiling harness, HF and vLLM baselines | done (human asked to start Phase 3; ncu counters still blocked on the Windows host) |
 | 3 | Paged KV cache, block manager, KV store, reference paged attention, prefix cache, memory waste | done (human asked to start Phase 4) |
-| 4 | Continuous batching scheduler, chunked prefill, preemption, engine step loop | in progress (P4.1 done) |
+| 4 | Continuous batching scheduler, chunked prefill, preemption, engine step loop | in progress (P4.2 done) |
 | 5 | Triton kernels: fused add+RMSNorm, RoPE, paged decode attention (split-K and prefill are stretch) | not started |
 | 6 | CUDA graphs for decode | not started |
 | 7 | OpenAI-compatible FastAPI SSE server, engine thread, SLA-aware admission control | not started |
@@ -104,7 +104,7 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `tinyserve/engine/sequence.py` | `SamplingParams` (temperature 0 is greedy, top-k -1 is off), `SequenceStatus`, and `Sequence` with the spec Section 9 fields. |
 | `tinyserve/engine/sampler.py` | `sample_token`: temperature, then top-k, then top-p. A per-request `torch.Generator` keeps seeds from sharing the global RNG. |
 | `tinyserve/engine/engine.py` | `generate` and `generate_tokens` share one paged pool across the prompts in that call. Full prompt blocks can stay cached. A later request reuses a matching prefix and prefills only the tail. The last prompt token is always computed. `GenerationResult.num_cached_prompt_tokens` is how many prompt tokens were reused. `record_kv_waste` stores a slot sample after each step. A later call that needs more blocks builds a new pool and drops the cache. Stop ids are not emitted. Timing fields are taken after the logits for that token are ready. |
-| `tinyserve/engine/scheduler.py` | Waiting and running queues. `schedule` runs decodes first, then prefill chunks, within `max_num_batched_tokens` and `max_num_seqs`. It reserves blocks and leaves `num_computed_tokens` for the caller to advance after the forward. `preempted` is empty until P4.2. |
+| `tinyserve/engine/scheduler.py` | Waiting and running queues. `schedule` runs decodes first, then prefill chunks, within `max_num_batched_tokens` and `max_num_seqs`. It reserves blocks and leaves `num_computed_tokens` for the caller to advance after the forward. When the free list is short, the newest other running request is preempted: its KV is dropped and it is prefilled again later, including tokens it already generated. |
 | `tinyserve/engine/model_runner.py` | `prepare_model_input` flattens the new tokens into `input_ids`, `positions`, `slot_mapping`, `query_start_loc`, `seq_lens`, `block_tables` (padded with -1), and `logits_indices`. `run_paged` calls `forward_paged`. `num_computed_tokens` advances only after the forward. |
 | `tinyserve/kv/cache.py` | Paged K/V tensors and the startup block count. Budget is `total * utilization - weights - peak activations - safety margin`. `str(CacheProfile)` is the startup line: blocks and token capacity. Tied weights are counted once. |
 | `tinyserve/kv/block_manager.py` | Free list and ref counts. `allocate` appends ids for `num_computed_tokens + num_new_tokens`. `free` and `truncate` drop blocks at ref count 0. A cached block is parked for the prefix cache instead. `share` can attach a parked block. |
@@ -142,7 +142,7 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `tests/unit/test_model_runner.py` | Slot packing and -1 padding. A paged prefill matches contiguous logits exactly in float32. A later chunk and a mixed prefill/decode batch match within 1e-5. |
 | `tests/unit/test_prefix_cache.py` | A changed parent misses, the block that holds the last prompt token is not reused, LRU eviction, and a second request skips a shared prefix with the same greedy ids. |
 | `tests/unit/test_kv_waste.py` | Waste fraction, 15/16/17-token blocks, a short table rejected, two sequences at once, and engine steps matching the block-manager walk. |
-| `tests/unit/test_scheduler.py` | Decodes before prefills, chunk splits, chunking off, the sequence cap, continuation before a new admit, decode rotation, and a full pool that does not preempt. |
+| `tests/unit/test_scheduler.py` | Decodes before prefills, chunk splits, chunking off, the sequence cap, continuation before a new admit, decode rotation, a lone request that is not preempted, and a full pool that still finishes every request with the same tokens. |
 | `tests/unit/test_datasets.py` | Length filtering and fixed-seed subsets for all four workloads, using in-test fixtures. |
 | `tests/unit/test_offline.py` | Section 11 JSONL schema on the tiny model (written under `tmp_path`, not committed) and median-repeat selection. |
 | `tests/unit/test_baselines.py` | Hugging Face `generate` JSONL shape and a profiler summary, both on the tiny model. |
@@ -221,7 +221,7 @@ Full entries are in `docs/DECISIONS.md`.
 
 ## 12. Next steps
 
-1. P4.2 preemption: when a step cannot allocate, preempt the most recently arrived running sequence, free its blocks, and requeue it for recomputation. A test that forces block exhaustion still finishes every request.
+1. P4.3 engine step loop: `step` schedules, runs, samples, updates, and frees finished sequences. Batched greedy outputs must match one-at-a-time outputs.
 2. Human: revoke the HF token that was pasted in chat and replace the `HF_TOKEN` line in `~/.bashrc`. Request Llama 3.1 8B access before the final benchmarks. Allow GPU performance counters in NVIDIA App when an ncu summary is wanted.
 
 ## 13. Change log
@@ -253,3 +253,4 @@ Full entries are in `docs/DECISIONS.md`.
 - 2026-10-07 P3.6: full prompt blocks stay cached by a parent-hash chain. A later shared-prefix request prefills only the tail. Computed tokens and TTFT are in the phase3 result file.
 - 2026-10-07 P3.7: each engine step records paged slots and a contiguous reservation of `max_model_len` (4096). Both waste fractions are in the phase3 result file. Phase 3 code is complete, waiting for the human review gate.
 - 2026-10-07 P4.1: the scheduler runs decodes first, then splits prefills into the leftover token budget. Blocks are reserved in that call. Human asked to start Phase 4.
+- 2026-10-09 P4.2: a full KV pool preempts the newest other running request and prefills it again later. A squeezed pool still finishes every request with the same tokens.

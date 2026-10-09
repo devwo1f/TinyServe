@@ -1,5 +1,7 @@
 """Scheduler: decodes first, then prefill chunks, within budget and free blocks."""
 
+from collections import deque
+
 from tinyserve.config import SchedulerConfig
 from tinyserve.engine.scheduler import Scheduler
 from tinyserve.engine.sequence import SamplingParams, Sequence, SequenceStatus
@@ -198,3 +200,80 @@ def test_prefix_tokens_already_computed_are_not_prefilled_again():
     assert batch.seqs[0].num_new_tokens == 2
     assert batch.seqs[0].is_prefill
     assert seq.num_computed_tokens == 4
+
+
+def test_the_newest_running_sequence_is_preempted_when_blocks_run_out():
+    manager = BlockManager(2, 4)
+    sched = Scheduler(manager, _cfg(max_num_batched_tokens=1, max_num_seqs=2))
+    older = _running(manager, _seq(0, 4, max_tokens=2), 4)
+    newer = _running(manager, _seq(1, 3, max_tokens=2), 4)
+    newer.output_token_ids = [9]
+    older.arrival_time = 1.0
+    newer.arrival_time = 2.0
+    sched.running.append(older)
+    sched.running.append(newer)
+
+    batch = sched.schedule()
+
+    assert [item.seq.seq_id for item in batch.seqs] == [0]
+    assert [seq.seq_id for seq in batch.preempted] == [1]
+    assert newer.status == SequenceStatus.PREEMPTED
+    assert newer.num_computed_tokens == 0
+    assert newer.output_token_ids == [9]
+    assert newer.block_table == []
+    assert list(sched.waiting) == [newer]
+    assert len(older.block_table) == 2
+
+
+def test_preemption_still_finishes_every_request_with_the_same_tokens():
+    # Each request peaks at 2 blocks. The small pool holds one of them.
+    small = _finish_all(num_blocks=2)
+    roomy = _finish_all(num_blocks=8)
+    assert small == roomy
+    assert [len(tokens) for tokens in small] == [4, 4]
+
+
+def _running(manager: BlockManager, seq: Sequence, num_tokens: int) -> Sequence:
+    manager.allocate(seq, num_tokens)
+    seq.num_computed_tokens = num_tokens
+    seq.status = SequenceStatus.RUNNING
+    return seq
+
+
+def _finish_all(num_blocks: int) -> list[list[int]]:
+    """Drive schedule until both requests hit max_tokens. Finished KV is freed here.
+
+    The engine step loop (P4.3) is what will do that free. This stand-in is
+    enough to show a squeezed pool still emits the same tokens.
+    """
+    manager = BlockManager(num_blocks, 4)
+    sched = Scheduler(manager, _cfg(max_num_batched_tokens=32, max_num_seqs=4))
+    seqs = [_seq(0, 4, max_tokens=4), _seq(1, 4, max_tokens=4)]
+    for seq in seqs:
+        sched.add(seq)
+    for _ in range(200):
+        if all(seq.status == SequenceStatus.FINISHED for seq in seqs):
+            break
+        batch = sched.schedule()
+        if not batch.seqs and not batch.preempted:
+            break
+        for item in batch.seqs:
+            _play(item.seq, item.num_new_tokens)
+            if len(item.seq.output_token_ids) >= item.seq.sampling_params.max_tokens:
+                item.seq.status = SequenceStatus.FINISHED
+                manager.free(item.seq)
+                sched.running = deque(seq for seq in sched.running if seq.seq_id != item.seq.seq_id)
+    assert [seq.status for seq in seqs] == [SequenceStatus.FINISHED, SequenceStatus.FINISHED]
+    return [list(seq.output_token_ids) for seq in seqs]
+
+
+def _play(seq: Sequence, num_new_tokens: int) -> None:
+    """Write KV. Sample only positions that are not already in the context."""
+    start = seq.num_computed_tokens
+    for offset in range(num_new_tokens):
+        pos = start + offset
+        context = seq.prompt_token_ids + seq.output_token_ids
+        if pos < len(context):
+            continue
+        seq.output_token_ids.append(sum(context) % 50)
+    seq.num_computed_tokens = start + num_new_tokens

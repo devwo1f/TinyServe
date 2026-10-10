@@ -37,3 +37,4 @@ Links for AdaSpec and Nightjar are added when the papers are read.
 | 2026-10-07 | P3.7 | Kwon et al., PagedAttention (already listed above) | A contiguous cache reserves the maximum sequence length for every live request. Paging only holds the blocks those tokens need, so the unused part is the tail of the last block. No code was copied. |
 | 2026-10-07 | P4.1 | Agrawal et al., Sarathi-Serve (already listed above), and the continuous-batching loop in Orca / vLLM | Decode tokens are scheduled before prefill. A prompt that does not fit in the leftover budget is split into chunks. No code was copied. |
 | 2026-10-09 | P4.2 | Orca and vLLM (already listed above) | When KV blocks run out, the newest running request is evicted and recomputed later. No code was copied. |
+| 2026-10-09 | P4.3 | Orca (already listed above) | One iteration runs every request that has a token ready, samples, and releases finished requests. No code was copied. |

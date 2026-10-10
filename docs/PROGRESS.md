@@ -22,6 +22,16 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-10-10 | Cursor | Task P4.3
+
+**Status:** done
+**What changed:** `Engine.step` schedules a mixed batch, runs one forward, samples, and frees finished sequences. A decode samples the logit saved when its context was filled, appends that id, then the forward writes KV for it. A prefill chunk keeps a logit only when it lands on the last context token. A stop id is not emitted, and the slot reserved for it is truncated. Preemption drops the saved logit. `Scheduler.finish` removes the sequence from both queues after the prefix cache has seen its prompt blocks.
+**Tests:** `tests/unit/test_engine.py`, `tests/unit/test_scheduler.py`, `tests/unit/test_prefix_cache.py`. CPU: two prompts in one call match one-at-a-time and Hugging Face greedy ids; a budget of 4 matches a full prefill; a pool of 2 blocks of size 4 matches a roomy pool; a stop id ends one request and leaves the other request's tokens intact. `finish` leaves the block table allocated. A later call still reuses a cached prefix. Existing waste samples for one request still match the block-manager walk. CPU suite: 125 passed, 3 deselected.
+**Results:** none
+**Decisions:** none. Conceptual note in REFERENCES.md.
+**Next step:** P4.4 benchmark. Offline and Poisson-rate sweeps on the dev model versus the naive engine and vLLM. Commit result files. The learning note covers the throughput-latency trade-off and the effect of chunk size on p99 ITL.
+**Questions for the human:** none
+
 ## 2026-10-09 | Cursor | Task P4.2
 
 **Status:** done

@@ -187,6 +187,20 @@ def test_a_decode_that_needs_a_new_block_is_skipped_when_the_pool_is_full():
     assert len(seq.block_table) == 1
 
 
+def test_finish_drops_the_sequence_and_leaves_its_blocks_allocated():
+    manager = BlockManager(4, 4)
+    sched = Scheduler(manager, _cfg())
+    seq = _running(manager, _seq(0, 4), 4)
+    sched.running.append(seq)
+
+    sched.finish(seq)
+
+    assert seq.status == SequenceStatus.FINISHED
+    assert list(sched.running) == []
+    assert seq.block_table != []
+    assert sched.schedule().seqs == []
+
+
 def test_prefix_tokens_already_computed_are_not_prefilled_again():
     manager = BlockManager(4, 4)
     sched = Scheduler(manager, _cfg(max_num_batched_tokens=8))

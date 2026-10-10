@@ -86,11 +86,14 @@ def test_a_second_request_skips_the_shared_prefix_and_matches_a_cold_prefill():
     params = SamplingParams(temperature=0.0, max_tokens=3)
     warm = Engine(model, _Ascii(), block_size=4)
     cold = Engine(model, _Ascii(), block_size=4, enable_prefix_caching=False)
-    cached = warm.generate_tokens([prompt, other], params)
+    # The first call has to finish before its blocks are cached. A single
+    # batched call runs both prompts together, so the second would not see them.
+    first = warm.generate_tokens([prompt], params)
+    second = warm.generate_tokens([other], params)
     alone = cold.generate_tokens([other], params)[0]
-    assert cached[0].num_cached_prompt_tokens == 0
-    assert cached[1].num_cached_prompt_tokens == 8
-    assert cached[1].output_token_ids == alone.output_token_ids
+    assert first[0].num_cached_prompt_tokens == 0
+    assert second[0].num_cached_prompt_tokens == 8
+    assert second[0].output_token_ids == alone.output_token_ids
 
     off = Engine(model, _Ascii(), block_size=4, enable_prefix_caching=False)
     uncached = off.generate_tokens([prompt, other], params)

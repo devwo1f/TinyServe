@@ -1,4 +1,4 @@
-"""Naive engine: one sequence at a time, greedy tokens match Hugging Face."""
+"""Engine step loop: batched greedy tokens match one-at-a-time and Hugging Face."""
 
 import json
 from pathlib import Path
@@ -8,6 +8,7 @@ import torch
 from transformers import LlamaConfig as HFConfig
 from transformers import LlamaForCausalLM as HFLlama
 
+from tinyserve.config import SchedulerConfig
 from tinyserve.engine.engine import Engine
 from tinyserve.engine.sequence import SamplingParams
 from tinyserve.model.llama import LlamaForCausalLM, LlamaModelConfig
@@ -79,7 +80,7 @@ def test_greedy_tokens_match_hf_one_prompt_at_a_time():
         torch.randint(0, 256, (3,)).tolist(),
     ]
     params = SamplingParams(temperature=0.0, max_tokens=6, stop_token_ids=[])
-    engine = Engine(ours, _Ascii())
+    engine = Engine(ours, _Ascii(), enable_prefix_caching=False)
     results = engine.generate_tokens(prompts, params)
     assert len(results) == 2
     for prompt, result in zip(prompts, results, strict=True):
@@ -126,6 +127,74 @@ def test_generate_encodes_the_prompt_string():
     from_ids = engine.generate_tokens([[ord("A"), ord("b")]], params)
     assert from_string[0].output_token_ids == from_ids[0].output_token_ids
     assert from_string[0].prompt_token_ids == [ord("A"), ord("b")]
+
+
+def test_batched_greedy_matches_one_sequence_at_a_time():
+    hf, ours = _pair()
+    torch.manual_seed(2)
+    prompts = [
+        torch.randint(0, 256, (7,)).tolist(),
+        torch.randint(0, 256, (4,)).tolist(),
+    ]
+    params = SamplingParams(temperature=0.0, max_tokens=5)
+    serial = Engine(
+        ours,
+        _Ascii(),
+        enable_prefix_caching=False,
+        scheduler_config=SchedulerConfig(max_num_seqs=1),
+    )
+    batched = Engine(ours, _Ascii(), enable_prefix_caching=False)
+    alone = [serial.generate_tokens([prompt], params)[0] for prompt in prompts]
+    together = batched.generate_tokens(prompts, params)
+    assert [row.output_token_ids for row in together] == [row.output_token_ids for row in alone]
+    for prompt, row in zip(prompts, together, strict=True):
+        assert row.output_token_ids == _greedy_hf(hf, prompt, params.max_tokens)
+
+
+def test_a_small_token_budget_matches_a_full_prefill():
+    _, ours = _pair()
+    torch.manual_seed(3)
+    prompt = torch.randint(0, 256, (10,)).tolist()
+    params = SamplingParams(temperature=0.0, max_tokens=4)
+    chunked = Engine(
+        ours,
+        _Ascii(),
+        enable_prefix_caching=False,
+        scheduler_config=SchedulerConfig(max_num_batched_tokens=4),
+    )
+    whole = Engine(ours, _Ascii(), enable_prefix_caching=False)
+    assert chunked.generate_tokens([prompt], params)[0].output_token_ids == (
+        whole.generate_tokens([prompt], params)[0].output_token_ids
+    )
+
+
+def test_a_tight_block_pool_matches_one_at_a_time():
+    # Each request peaks at 2 blocks of 4. A pool of 2 cannot hold both.
+    _, ours = _pair()
+    prompts = [[1, 2, 3, 4], [5, 6, 7, 8]]
+    params = SamplingParams(temperature=0.0, max_tokens=4)
+    tight = Engine(ours, _Ascii(), block_size=4, num_blocks=2, enable_prefix_caching=False)
+    roomy = Engine(ours, _Ascii(), block_size=4, enable_prefix_caching=False)
+    assert [row.output_token_ids for row in tight.generate_tokens(prompts, params)] == [
+        row.output_token_ids for row in roomy.generate_tokens(prompts, params)
+    ]
+
+
+def test_a_stop_token_in_a_batch_does_not_stop_the_other_request():
+    _, ours = _pair()
+    prompts = [[4, 5, 6, 7], [8, 9, 10]]
+    full = SamplingParams(temperature=0.0, max_tokens=4)
+    solo = Engine(ours, _Ascii(), enable_prefix_caching=False)
+    first = solo.generate_tokens([prompts[0]], full)[0].output_token_ids
+    second = solo.generate_tokens([prompts[1]], full)[0].output_token_ids
+    stopped = SamplingParams(temperature=0.0, max_tokens=4, stop_token_ids=[first[1]])
+    batched = Engine(ours, _Ascii(), enable_prefix_caching=False)
+    # One SamplingParams applies to the whole call, so the stop id is armed
+    # for both. The second prompt's tokens are not that id.
+    rows = batched.generate_tokens(prompts, stopped)
+    assert rows[0].output_token_ids == [first[0]]
+    assert rows[0].num_computed_tokens == len(prompts[0]) + 1
+    assert rows[1].output_token_ids == second
 
 
 def test_empty_prompt_and_zero_max_tokens_raise():

@@ -51,3 +51,4 @@ Confirm a gate by adding `## <YYYY-MM-DD> | HUMAN | Gate after Phase <n> passed`
 | [p3-7-kv-waste.md](p3-7-kv-waste.md) | Paged slots versus a contiguous reservation of the serving max length |
 | [p4-1-scheduler.md](p4-1-scheduler.md) | Decode-first steps, chunked prefill, and the token budget |
 | [p4-2-preemption.md](p4-2-preemption.md) | Dropping the newest request's KV when the block pool is full |
+| [p4-3-engine-step.md](p4-3-engine-step.md) | One engine step: schedule, forward, sample, free finished |

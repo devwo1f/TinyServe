@@ -1,19 +1,25 @@
-"""Offline generation, one request at a time.
+"""Generation on one paged pool, several requests per step.
 
-The engine keeps one paged pool for the calls it has seen. Full prompt
-blocks can stay cached after a request finishes, so the next prompt that
-starts with the same tokens skips that prefill. The pool is sized for the
-longest request in a call. Phase 4 replaces the loop with continuous
-batching over a shared pool.
+``step`` asks the scheduler who runs, forwards that mixed batch once, samples
+the next token for every sequence whose context is now full, and frees
+sequences that stopped. A short decode is in the same forward as a prefill
+chunk, instead of waiting for some other request to finish.
+
+The pool is sized for every prompt in the call. Full prompt blocks can stay
+cached after a request finishes, so a later call that starts with the same
+tokens skips that prefill. A call that needs more blocks builds a new pool
+and drops the cache.
 """
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import torch
 
+from tinyserve.config import SchedulerConfig
 from tinyserve.engine.model_runner import prepare_model_input, run_paged
 from tinyserve.engine.sampler import sample_token
+from tinyserve.engine.scheduler import ScheduledBatch, ScheduledSeq, Scheduler
 from tinyserve.engine.sequence import SamplingParams, Sequence, SequenceStatus
 from tinyserve.kv.block_manager import BlockManager, blocks_for_tokens
 from tinyserve.kv.cache import PagedKVCache
@@ -49,15 +55,66 @@ class GenerationResult:
     slot_samples: tuple[SlotSample, ...] = ()
 
 
+@dataclass
+class _Live:
+    """Bookkeeping ``schedule`` does not own.
+
+    ``pending`` is the logit row from the forward that filled the context.
+    The next decode samples it. A preemption drops the row: that KV is gone.
+    """
+
+    seq: Sequence
+    generator: torch.Generator | None
+    arrival: float
+    cached: int
+    token_times: list[float] = field(default_factory=list)
+    samples: list[SlotSample] = field(default_factory=list)
+    pending: torch.Tensor | None = None
+
+
+class _EvictingBlockManager:
+    """Reclaim parked prefix blocks before the scheduler preempts anyone.
+
+    ``can_allocate`` is the scheduler's signal that the free list is short.
+    A cached block with no reader is not in use. Taking it back is cheaper
+    than dropping a running request and prefilling it again.
+    """
+
+    def __init__(self, manager: BlockManager, prefix: PrefixCache | None):
+        self.manager = manager
+        self._prefix = prefix
+
+    def can_allocate(self, seq: Sequence, num_new_tokens: int) -> bool:
+        if self.manager.can_allocate(seq, num_new_tokens):
+            return True
+        if self._prefix is None:
+            return False
+        while not self.manager.can_allocate(seq, num_new_tokens):
+            evicted = self._prefix.evict_lru()
+            if evicted is None:
+                return False
+            self.manager.reclaim(evicted)
+        return True
+
+    def allocate(self, seq: Sequence, num_new_tokens: int) -> None:
+        self.manager.allocate(seq, num_new_tokens)
+
+    def free(self, seq: Sequence) -> None:
+        self.manager.free(seq)
+
+
 class Engine:
-    """Run ``LlamaForCausalLM`` on a paged KV cache, one request at a time.
+    """Run ``LlamaForCausalLM`` on a paged KV cache, many requests per step.
 
     ``generate`` is the spec's offline API. ``generate_tokens`` is the same
     loop for callers who already have ids (a chat template, or a test).
+    ``step`` is one iteration: schedule, run, sample, update, free finished.
     ``block_size`` is the page size. The default matches ``CacheConfig``.
     Prefix caching is on by default for the same reason. ``record_kv_waste``
-    keeps a slot sample after every step. ``contiguous_max_len`` is the dense
-    reservation those samples charge; it defaults to the model's context.
+    keeps a slot sample after every forward. ``contiguous_max_len`` is the
+    dense reservation those samples charge; it defaults to the model's context.
+    ``num_blocks`` fixes the pool size so a test can force preemption. Left
+    unset, the pool holds every request in the call at once.
     """
 
     def __init__(
@@ -68,26 +125,34 @@ class Engine:
         enable_prefix_caching: bool = True,
         record_kv_waste: bool = False,
         contiguous_max_len: int | None = None,
+        scheduler_config: SchedulerConfig | None = None,
+        num_blocks: int | None = None,
     ):
         if block_size < 1:
             raise ValueError("block_size must be positive")
         if contiguous_max_len is not None and contiguous_max_len < 1:
             raise ValueError("contiguous_max_len must be positive")
+        if num_blocks is not None and num_blocks < 1:
+            raise ValueError("num_blocks must be positive")
         self.model = model
         self.tokenizer = tokenizer
         self.block_size = block_size
         self.enable_prefix_caching = enable_prefix_caching
         self.record_kv_waste = record_kv_waste
         self.contiguous_max_len = contiguous_max_len
+        self.scheduler_config = scheduler_config or SchedulerConfig()
+        self.num_blocks = num_blocks
         self._next_seq_id = 0
         self._prefix: PrefixCache | None = None
         self._manager: BlockManager | None = None
         self._cache: PagedKVCache | None = None
+        self._scheduler: Scheduler | None = None
+        self._live: dict[int, _Live] = {}
 
     def generate(
         self, prompts: list[str], sampling_params: SamplingParams
     ) -> list[GenerationResult]:
-        """Complete each prompt before starting the next.
+        """Complete the prompts on one shared pool.
 
         `encode` does not add a beginning-of-sequence token. A chat prompt
         should go through `Tokenizer.apply_chat_template` and then
@@ -102,23 +167,74 @@ class Engine:
     def generate_tokens(
         self, prompts: list[list[int]], sampling_params: SamplingParams
     ) -> list[GenerationResult]:
-        """Greedy or sampled completion for each token-id prompt, sequentially."""
+        """Greedy or sampled completion for every prompt, batched each step."""
         if not isinstance(sampling_params, SamplingParams):
             raise TypeError("sampling_params must be one SamplingParams for the whole call")
         if sampling_params.max_tokens < 1:
             raise ValueError("max_tokens must be at least 1")
         if not prompts:
             return []
-        # One pool for every prompt in the call. A later, longer call replaces
-        # it, and the prefix cache starts empty again because the pages cannot grow.
-        need = max(
-            blocks_for_tokens(len(prompt_ids) + sampling_params.max_tokens, self.block_size)
-            for prompt_ids in prompts
-        )
+        self._live = {}
         device = next(self.model.parameters()).device
         dtype = next(self.model.parameters()).dtype
-        self._ensure_pool(need, device, dtype)
-        return [self._run_one(prompt_ids, sampling_params) for prompt_ids in prompts]
+        self._ensure_pool(self._blocks_for(prompts, sampling_params), device, dtype)
+        if self._scheduler is None:
+            raise RuntimeError("the KV pool is missing")
+        if self._scheduler.running or self._scheduler.waiting:
+            raise RuntimeError("a previous call left sequences in the scheduler")
+        sequences = [self._enqueue(prompt_ids, sampling_params, device) for prompt_ids in prompts]
+        # Preemption can recompute a request. The cap is far above one forward
+        # per token, and it exists so a stuck pool fails instead of spinning.
+        cap = sum(len(prompt) + sampling_params.max_tokens for prompt in prompts) * len(prompts) * 8
+        steps = 0
+        while any(seq.status != SequenceStatus.FINISHED for seq in sequences):
+            batch = self.step()
+            steps += 1
+            if steps > max(cap, 1):
+                raise RuntimeError("engine step did not finish the batch")
+            if not batch.seqs and not batch.preempted:
+                raise RuntimeError("no token was scheduled; pool or token budget is too small")
+        return [self._result(seq) for seq in sequences]
+
+    @torch.inference_mode()
+    def step(self) -> ScheduledBatch:
+        """One iteration: schedule, run, sample, update, free finished.
+
+        Decode entries are sampled before the forward. The scheduler already
+        reserved a slot for that new token, and the model can only run a token
+        whose id is on the sequence. A prefill chunk runs tokens that already
+        exist. Logits are kept only when the chunk lands on the last context
+        token; a mid-prompt logit repeats a token the prompt already has.
+        """
+        if self._scheduler is None or self._manager is None or self._cache is None:
+            raise RuntimeError("the KV pool is missing")
+        self._restore_prefixes()
+        batch = self._scheduler.schedule()
+        for victim in batch.preempted:
+            live = self._live.get(victim.seq_id)
+            if live is not None:
+                live.pending = None
+        runnable: list[ScheduledSeq] = []
+        for item in batch.seqs:
+            if item.is_prefill:
+                runnable.append(item)
+                continue
+            if self._accept_new_token(item.seq):
+                runnable.append(item)
+        if runnable:
+            self._forward(runnable)
+            self._note_slots(runnable)
+        self._retire()
+        return batch
+
+    def _blocks_for(self, prompts: list[list[int]], params: SamplingParams) -> int:
+        """How many blocks this call needs if every request is live together."""
+        if self.num_blocks is not None:
+            return self.num_blocks
+        return sum(
+            blocks_for_tokens(len(prompt_ids) + params.max_tokens, self.block_size)
+            for prompt_ids in prompts
+        )
 
     def _ensure_pool(self, num_blocks: int, device: torch.device, dtype: torch.dtype) -> None:
         """Allocate the shared KV pool. A bigger later request drops the old pages."""
@@ -132,6 +248,9 @@ class Engine:
             is_cached=None if prefix is None else prefix.is_cached,
             park_cached=None if prefix is None else prefix.park,
         )
+        self._scheduler = Scheduler(
+            _EvictingBlockManager(self._manager, prefix), self.scheduler_config
+        )
         config = self.model.config
         self._cache = PagedKVCache(
             num_blocks=num_blocks,
@@ -142,6 +261,54 @@ class Engine:
             dtype=dtype,
             device=device,
         )
+
+    def _enqueue(
+        self, prompt_ids: list[int], params: SamplingParams, device: torch.device
+    ) -> Sequence:
+        """Queue one prompt. Cached full blocks are shared before the first schedule."""
+        if not prompt_ids:
+            raise ValueError("prompt is empty")
+        limit = self.model.config.max_position_embeddings
+        if len(prompt_ids) + params.max_tokens > limit:
+            raise ValueError(
+                f"prompt ({len(prompt_ids)}) plus max_tokens ({params.max_tokens}) "
+                f"exceeds max_position_embeddings ({limit})"
+            )
+        if self._scheduler is None:
+            raise RuntimeError("the KV pool is missing")
+        sequence = Sequence(
+            seq_id=self._next_seq_id,
+            prompt_token_ids=list(prompt_ids),
+            output_token_ids=[],
+            sampling_params=params,
+            status=SequenceStatus.WAITING,
+            num_computed_tokens=0,
+            block_table=[],
+            arrival_time=time.perf_counter(),
+            first_token_time=None,
+        )
+        self._next_seq_id += 1
+        cached = self._take_cached_prefix(sequence, prompt_ids)
+        self._live[sequence.seq_id] = _Live(
+            seq=sequence,
+            generator=_request_generator(params, device),
+            arrival=sequence.arrival_time,
+            cached=cached,
+        )
+        self._scheduler.add(sequence)
+        return sequence
+
+    def _restore_prefixes(self) -> None:
+        """A preempted request lost its table. Share a cached prompt again if one exists."""
+        if self._scheduler is None:
+            return
+        for seq in self._scheduler.waiting:
+            if seq.num_computed_tokens != 0 or seq.block_table:
+                continue
+            cached = self._take_cached_prefix(seq, seq.prompt_token_ids)
+            live = self._live.get(seq.seq_id)
+            if live is not None:
+                live.cached = cached
 
     def _take_cached_prefix(self, sequence: Sequence, prompt_ids: list[int]) -> int:
         """Share cached full blocks and return how many prompt tokens that covers."""
@@ -154,123 +321,115 @@ class Engine:
         sequence.num_computed_tokens = len(reused) * self.block_size
         return sequence.num_computed_tokens
 
-    def _reserve(self, sequence: Sequence, num_new_tokens: int) -> None:
-        """Allocate `num_new_tokens`, evicting unused prefix blocks if the free list is short."""
-        if self._manager is None:
-            raise RuntimeError("the KV pool is missing")
-        while not self._manager.can_allocate(sequence, num_new_tokens):
-            if self._prefix is None:
-                break
-            evicted = self._prefix.evict_lru()
-            if evicted is None:
-                break
-            self._manager.reclaim(evicted)
-        self._manager.allocate(sequence, num_new_tokens)
+    def _accept_new_token(self, seq: Sequence) -> bool:
+        """Sample the token the last forward already scored. False means stop.
 
-    def _slot_sample(self, sequence: Sequence) -> SlotSample | None:
-        """One waste sample for the sequences live on this step.
-
-        Called after ``num_computed_tokens`` moves and before ``free`` clears
-        the table. The contiguous side charges ``max_len`` for each live
-        sequence, which is what a dense cache holds for the whole request.
+        The clock is read after ``.item()``, which waits until those logits
+        are ready. The forward that stores this token happens afterwards, so
+        the timestamp does not include that write.
         """
-        if not self.record_kv_waste:
-            return None
+        live = self._live[seq.seq_id]
+        if live.pending is None:
+            raise RuntimeError(f"sequence {seq.seq_id} has no logits to sample")
+        logits = live.pending  # [vocab]
+        live.pending = None
+        token = int(sample_token(logits, seq.sampling_params, live.generator).item())
+        if token in set(seq.sampling_params.stop_token_ids):
+            # schedule() reserved a slot for this token. It will not be written.
+            if self._manager is None:
+                raise RuntimeError("the KV pool is missing")
+            self._manager.truncate(seq, seq.num_computed_tokens)
+            self._mark_finished(seq)
+            return False
+        now = time.perf_counter()
+        if seq.first_token_time is None:
+            seq.first_token_time = now
+        live.token_times.append(now)
+        seq.output_token_ids.append(token)
+        return True
+
+    def _forward(self, items: list[ScheduledSeq]) -> None:
+        """Write KV for the scheduled tokens and keep logits that can be sampled."""
+        if self._cache is None or self._manager is None:
+            raise RuntimeError("the KV pool is missing")
+        seqs = [item.seq for item in items]
+        counts = [item.num_new_tokens for item in items]
+        model_input = prepare_model_input(seqs, counts, self.block_size, self._cache.k.device)
+        logits = run_paged(self.model, self._cache, model_input)  # [num_seqs, vocab]
+        _sync(self._cache.k.device)
+        for index, item in enumerate(items):
+            seq = item.seq
+            seq.num_computed_tokens += item.num_new_tokens
+            context = _context_len(seq)
+            if seq.num_computed_tokens < context:
+                continue
+            if seq.num_computed_tokens > context:
+                raise RuntimeError("computed tokens ran past the sequence")
+            if len(seq.output_token_ids) >= seq.sampling_params.max_tokens:
+                self._mark_finished(seq)
+                continue
+            self._live[seq.seq_id].pending = logits[index].clone()  # [vocab]
+
+    def _note_slots(self, ran: list[ScheduledSeq]) -> None:
+        """One waste sample for the sequences that still hold blocks, before free."""
+        if not self.record_kv_waste or self._scheduler is None:
+            return
         max_len = self.contiguous_max_len
         if max_len is None:
             max_len = self.model.config.max_position_embeddings
-        return sample_slots(
-            [list(sequence.block_table)],
-            [sequence.num_computed_tokens],
+        live = [seq for seq in self._scheduler.running if seq.block_table]
+        if not live:
+            return
+        sample = sample_slots(
+            [list(seq.block_table) for seq in live],
+            [seq.num_computed_tokens for seq in live],
             block_size=self.block_size,
             max_len=max_len,
         )
+        for item in ran:
+            self._live[item.seq.seq_id].samples.append(sample)
 
-    def _run_one(self, prompt_ids: list[int], params: SamplingParams) -> GenerationResult:
-        """Prefill the uncached tail of `prompt_ids`, then sample up to `max_tokens`."""
-        if not prompt_ids:
-            raise ValueError("prompt is empty")
-        limit = self.model.config.max_position_embeddings
-        if len(prompt_ids) + params.max_tokens > limit:
-            raise ValueError(
-                f"prompt ({len(prompt_ids)}) plus max_tokens ({params.max_tokens}) "
-                f"exceeds max_position_embeddings ({limit})"
-            )
-        if self._manager is None or self._cache is None:
-            raise RuntimeError("the KV pool is missing")
-        manager = self._manager
-        cache = self._cache
-        device = cache.k.device
-        block_size = self.block_size
-        sequence = Sequence(
-            seq_id=self._next_seq_id,
-            prompt_token_ids=list(prompt_ids),
-            output_token_ids=[],
-            sampling_params=params,
-            status=SequenceStatus.RUNNING,
-            num_computed_tokens=0,
-            block_table=[],
-            arrival_time=time.monotonic(),
-            first_token_time=None,
-        )
-        self._next_seq_id += 1
-        cached = self._take_cached_prefix(sequence, prompt_ids)
-        remaining = len(prompt_ids) - cached
-        samples: list[SlotSample] = []
-        self._reserve(sequence, remaining)
-        generator = _request_generator(params, device)
-        stop_ids = set(params.stop_token_ids)
-        # perf_counter, and a GPU sync before each read: the forward returns
-        # before the kernels finish, so an unsynced clock measures the launch.
-        arrival = time.perf_counter()
-        sequence.arrival_time = arrival
+    def _mark_finished(self, seq: Sequence) -> None:
+        seq.status = SequenceStatus.FINISHED
+        live = self._live.get(seq.seq_id)
+        if live is not None:
+            live.pending = None
 
-        prefill = prepare_model_input([sequence], [remaining], block_size, device)
-        logits = run_paged(self.model, cache, prefill)  # [1, vocab]
-        sequence.num_computed_tokens = len(prompt_ids)
-        noted = self._slot_sample(sequence)
-        if noted is not None:
-            samples.append(noted)
-        _sync(device)
-        next_logits = logits[0]  # [vocab]
-        token_times: list[float] = []
-        for _ in range(params.max_tokens):
-            token = int(sample_token(next_logits, params, generator).item())
-            if token in stop_ids:
-                break
-            # `.item()` has already waited for the logits this token came from.
-            # The forward below stores this token and builds the next logits.
-            token_times.append(time.perf_counter())
-            if sequence.first_token_time is None:
-                sequence.first_token_time = token_times[0]
-            sequence.output_token_ids.append(token)
-            self._reserve(sequence, 1)
-            step = prepare_model_input([sequence], [1], block_size, device)
-            next_logits = run_paged(self.model, cache, step)[0]  # [vocab]
-            sequence.num_computed_tokens += 1
-            noted = self._slot_sample(sequence)
-            if noted is not None:
-                samples.append(noted)
-            _sync(device)
-        sequence.status = SequenceStatus.FINISHED
-        if self._prefix is not None:
-            self._prefix.cache_prompt(sequence.block_table, sequence.prompt_token_ids)
-        manager.free(sequence)
+    def _retire(self) -> None:
+        """Cache full prompt blocks, free KV, and leave the running queue."""
+        if self._scheduler is None or self._manager is None:
+            return
+        for seq in list(self._scheduler.running):
+            if seq.status != SequenceStatus.FINISHED:
+                continue
+            if self._prefix is not None:
+                self._prefix.cache_prompt(seq.block_table, seq.prompt_token_ids)
+            self._manager.free(seq)
+            self._scheduler.finish(seq)
+
+    def _result(self, seq: Sequence) -> GenerationResult:
+        live = self._live[seq.seq_id]
+        times = live.token_times
         finished = time.perf_counter()
-        ttft = None if not token_times else token_times[0] - arrival
-        e2e = (token_times[-1] if token_times else finished) - arrival
-        itl = [token_times[i] - token_times[i - 1] for i in range(1, len(token_times))]
+        ttft = None if not times else times[0] - live.arrival
+        e2e = (times[-1] if times else finished) - live.arrival
+        itl = [times[i] - times[i - 1] for i in range(1, len(times))]
         return GenerationResult(
-            prompt_token_ids=sequence.prompt_token_ids,
-            output_token_ids=list(sequence.output_token_ids),
-            text=self.tokenizer.decode(sequence.output_token_ids),
-            num_computed_tokens=sequence.num_computed_tokens,
-            num_cached_prompt_tokens=cached,
+            prompt_token_ids=seq.prompt_token_ids,
+            output_token_ids=list(seq.output_token_ids),
+            text=self.tokenizer.decode(seq.output_token_ids),
+            num_computed_tokens=seq.num_computed_tokens,
+            num_cached_prompt_tokens=live.cached,
             ttft_s=ttft,
             e2e_s=e2e,
             itl_s=itl,
-            slot_samples=tuple(samples),
+            slot_samples=tuple(live.samples),
         )
+
+
+def _context_len(seq: Sequence) -> int:
+    """Prompt plus tokens already generated. Both need KV before the next sample."""
+    return len(seq.prompt_token_ids) + len(seq.output_token_ids)
 
 
 def _sync(device: torch.device) -> None:

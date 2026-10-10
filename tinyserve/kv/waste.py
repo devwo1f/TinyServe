@@ -128,9 +128,9 @@ def concurrent_slot_sample(
     """Every sequence live at once, each at its full length.
 
     This is the batch a contiguous allocator sizes to ``max_len`` per
-    sequence. Paging only holds the blocks those lengths need. The engine
-    still runs one request at a time; this snapshot is the same allocator
-    asked to keep them all.
+    sequence. Paging only holds the blocks those lengths need. A live engine
+    step can hold several requests at shorter lengths. This snapshot keeps
+    every request at its full length together.
     """
     if any(length < 1 for length in lengths):
         raise ValueError("lengths must be at least 1")

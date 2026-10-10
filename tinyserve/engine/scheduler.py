@@ -131,6 +131,18 @@ class Scheduler:
             preempted=preempted,
         )
 
+    def finish(self, seq: Sequence) -> None:
+        """Drop a sequence from both queues once it will not run again.
+
+        KV stays allocated. The engine frees it after the step's slot sample,
+        and after any full prompt blocks have been handed to the prefix cache.
+        ``schedule`` does not do this: a sequence that hit ``max_tokens`` is
+        still running until the caller says it is done.
+        """
+        seq.status = SequenceStatus.FINISHED
+        self.running = deque(item for item in self.running if item.seq_id != seq.seq_id)
+        self.waiting = deque(item for item in self.waiting if item.seq_id != seq.seq_id)
+
     def _chunk(self, seq: Sequence, budget: int) -> int:
         """How many context tokens this step can run. Zero means not this step."""
         remaining = _context_len(seq) - seq.num_computed_tokens

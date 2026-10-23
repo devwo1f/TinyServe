@@ -21,11 +21,11 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 
 ## 2. Current status
 
-- **Phase:** 4 (Continuous batching)
-- **Last completed task:** P4.4 offline, Poisson, and chunk-size benchmark
-- **In progress:** Phase 4 code is complete. Waiting for the human review gate before Phase 5. Dev environment is WSL2 (D-007). Llama 3.2 access is approved and `Llama-3.2-1B-Instruct` is downloaded locally. Nsight Compute counters are still blocked on the Windows host.
+- **Phase:** 5 (Triton kernels)
+- **Last completed task:** P5.1 fused residual add and RMSNorm
+- **In progress:** P5.2 RoPE kernel. Dev environment is WSL2 (D-007). Llama 3.2 access is approved and `Llama-3.2-1B-Instruct` is downloaded locally. Nsight Compute counters are still blocked on the Windows host.
 - **Working copy:** `~/TinyServe` inside WSL2 Ubuntu 24.04 (user `abhay`), opened in Cursor via the WSL remote. Do not develop in the old `D:\Projects\TinyServe` Windows copy.
-- **Review gates passed:** Phase 0, Phase 1, Phase 2, and Phase 3 (human asked to start the next phase)
+- **Review gates passed:** Phase 0, Phase 1, Phase 2, Phase 3, and Phase 4 (human asked to start the next phase)
 - **GitHub:** https://github.com/devwo1f/TinyServe (public)
 
 ## 3. Phase roadmap
@@ -36,8 +36,8 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 | 1 | From-scratch Llama (RoPE w/ Llama 3 scaling, GQA, SwiGLU), safetensors loading, sampler, naive engine, HF parity | done (human asked to start Phase 2) |
 | 2 | Benchmark + profiling harness, HF and vLLM baselines | done (human asked to start Phase 3; ncu counters still blocked on the Windows host) |
 | 3 | Paged KV cache, block manager, KV store, reference paged attention, prefix cache, memory waste | done (human asked to start Phase 4) |
-| 4 | Continuous batching scheduler, chunked prefill, preemption, engine step loop, measured concurrency | code complete (waiting for the human review gate) |
-| 5 | Triton kernels: fused add+RMSNorm, RoPE, paged decode attention (split-K and prefill are stretch) | not started |
+| 4 | Continuous batching scheduler, chunked prefill, preemption, engine step loop, measured concurrency | done (human asked to start Phase 5) |
+| 5 | Triton kernels: fused add+RMSNorm, RoPE, paged decode attention (split-K and prefill are stretch) | in progress (P5.1 done) |
 | 6 | CUDA graphs for decode | not started |
 | 7 | OpenAI-compatible FastAPI SSE server, engine thread, SLA-aware admission control | not started |
 | 8 | Speculative decoding (draft model, rejection sampling, KV rollback) | not started |
@@ -111,7 +111,8 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `tinyserve/kv/prefix_cache.py` | Hash chain of full blocks: SHA-256 of the parent hash and the tokens in the block. `match` walks until the first miss and stops before the last prompt token. Unused cached blocks sit on an LRU list. `evict_lru` forgets the oldest so the block manager can reclaim it. |
 | `tinyserve/kv/waste.py` | Section 10 waste fraction. Paged slots are the live block tables times `block_size`. Contiguous slots charge `max_len` per live sequence. `request_step_samples` walks one request the way the engine steps. `concurrent_slot_sample` holds every length at once. |
 | `tinyserve/kernels/kv_store.py` | Reference write of new K/V. `slot_mapping` is `block_id * block_size + offset`. `write_layer_kv` scatters one layer during the forward. `write_kv` does every layer. |
-| `tinyserve/kernels/reference.py` | `gather_paged_kv` rebuilds one sequence in logical order. `paged_attention_flat` accepts a flattened batch and a block table padded with -1. Query length 1 is decode. A longer query sits at the end of a cached prefix. |
+| `tinyserve/kernels/reference.py` | `gather_paged_kv` rebuilds one sequence in logical order. `paged_attention_flat` accepts a flattened batch and a block table padded with -1. Query length 1 is decode. A longer query sits at the end of a cached prefix. `add_rmsnorm` adds a residual in float32 and RMS-normalizes that sum. |
+| `tinyserve/kernels/rmsnorm.py` | Triton fused residual add and RMSNorm, one program per row. CPU calls the reference. `algorithm_bytes` counts each tensor once. `issued_bytes` counts the second load of the row. |
 | `bench/datasets.py` | ShareGPT, code (JSON/JSONL), shared-prefix, and synthetic workloads. Length filter, then a hash-ordered subset for a fixed seed. `prompt_token_ids` is what a benchmark must send. |
 | `bench/prefix_cache.py` | Shared-prefix run on Llama-3.2-1B with caching off, then on. Refuses to write if computed prompt tokens do not drop or greedy ids differ. |
 | `bench/kv_waste.py` | Eight variable-length requests on the tiny model. Records each engine step and a concurrent full-length snapshot. Refuses to write if the samples disagree with the block-manager walk. |
@@ -125,7 +126,7 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `scripts/profile_nsys.sh` | Nsight Systems timeline of that request. Writes a small JSON summary; the `.nsys-rep` stays in `profiles/`. |
 | `scripts/profile_ncu.sh` | Nsight Compute on the first few launches inside the same profiler range. Needs Windows GPU performance counters. |
 | `scripts/profile_summary.py` | Turns an nsys sqlite or an ncu CSV into the result JSON. `coverage_ns` is the idle-gap math. |
-| `bench/microbench/` | Kernel microbenchmarks (empty until Phase 5) |
+| `bench/microbench/rmsnorm.py` | Times the fused kernel against the PyTorch reference with `triton.testing.do_bench` and writes bandwidth utilization. |
 | `eval/` | Parity and perplexity evaluation (empty until Phase 1/9) |
 | `tests/fixtures/tiny_llama.json` | Tiny random Llama config in HF `config.json` format: 2 layers, hidden 64, 4 Q heads, 2 KV heads, head_dim 16, vocab 256, intermediate 128, Llama 3 `rope_scaling` |
 | `tests/unit/test_skeleton.py` | Smoke tests: package imports, fixture matches spec Section 6 |
@@ -151,8 +152,10 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `tests/unit/test_batching.py` | Poisson offsets, a delayed arrival matching an offline batch, JSONL token counts, and a plot written from fixture result files. |
 | `tests/unit/test_vllm_offline.py` | vLLM latency math and fixed-length rows. Does not import vLLM. |
 | `tests/unit/test_profile_summary.py` | Idle-gap math, nsys sqlite name lookup, and ncu CSV bandwidth. No GPU and no Nsight binary. |
+| `tests/unit/test_rmsnorm.py` | Float32 residual-add RMSNorm matches the module, including a one-column row, and the byte counts match the kernel loops. |
 | `tests/gpu/test_llama_parity.py` | (`gpu`, `slow`) Llama-3.2-1B bf16 greedy parity vs Hugging Face. Skipped when the weights are absent. |
 | `tests/gpu/test_engine_generate.py` | (`gpu`, `slow`) `Engine.generate` on one 1B prompt matches a Hugging Face argmax loop. Skipped when the weights are absent. |
+| `tests/gpu/test_rmsnorm.py` | (`gpu`) Triton fused add+RMSNorm matches the reference. Float32 within 1e-5. bf16 within 1e-2. |
 | `docs/results/phase1/2026-10-01_p1-4-greedy-parity.json` | Script-written 1B parity result. 10/10 prompts matched on the first 32 of 64 tokens; max absolute logit difference 0.0. |
 | `docs/results/phase1/2026-10-02_p1-6-naive-engine.json` | Script-written engine check: one bf16 prompt, 16 greedy tokens, matched Hugging Face. |
 | `docs/results/phase2/2026-10-06_p2-3-tinyserve-offline.jsonl` | Script-written naive TinyServe offline run on Llama-3.2-1B bf16. Synthetic, 8 requests, prompt 64, output 32, warmup 2, 3 repeats. Median output throughput is the summary line. Dirty run. |
@@ -163,6 +166,7 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `docs/results/phase3/2026-10-07_p3-6-prefix-cache.jsonl` | Script-written shared-prefix run on Llama-3.2-1B bf16, four prompts, output length 8, block size 16. Caching off then on. Computed prompt tokens and TTFT percentiles are the summary line. Dirty run. |
 | `docs/results/phase3/2026-10-07_p3-7-kv-waste.jsonl` | Script-written slot samples for eight variable-length requests. Paged waste and contiguous max-length waste are the summary line, per step and with every request live at full length. Dirty run. |
 | `docs/results/phase4/` | Script-written P4.4 sweeps on Llama-3.2-1B bf16, plus png files from `bench/plots.py`. Naive, batched, Poisson rates 1/4/16, chunk budgets 32/128/512, and a new vLLM offline file. Summary lines hold the throughput and latency. Dirty run. The Phase 2 vLLM file was not edited. |
+| `docs/results/phase5/2026-10-23_p5-1-rmsnorm.jsonl` | Script-written fused add+RMSNorm microbenchmark, bf16, on the RTX 4060 Laptop. Times and bandwidth utilization are the shape lines. Dirty run. Nsight Compute was not used. |
 | `tests/gpu/test_env_info_gpu.py` | (`gpu`) GPU fields are populated |
 
 ## 7. Environment and hardware
@@ -222,11 +226,11 @@ Full entries are in `docs/DECISIONS.md`.
 - Q-002: how to fit 3B target + 1B draft for speculative decoding on an 8 GB GPU (INT8 target vs cloud GPU; decide before Phase 8).
 - Llama 3.1 8B access is still needed before final benchmarks (the 3.2 gating group does not cover it).
 - The HF token was pasted into a chat. The human should revoke it and put a new one in `~/.bashrc`.
-- Nsight Compute still cannot read GPU performance counters until NVIDIA App allows them for all users. `bash scripts/profile_ncu.sh` writes the missing file after that. Phase 4 does not wait on it.
+- Nsight Compute still cannot read GPU performance counters until NVIDIA App allows them for all users. `bash scripts/profile_ncu.sh` writes the missing file after that. Phase 5 bandwidth in the P5.1 file is algorithm bytes over `do_bench` time, not an ncu counter.
 
 ## 12. Next steps
 
-1. Human review gate for Phase 4 (how a step is filled, what chunk size did to tail latency on the measured run, and when preemption drops KV). Do not start Phase 5 before that line is in `docs/PROGRESS.md`.
+1. P5.2 RoPE kernel. Apply rotary embedding to Q and K in place from positions. Correctness against the PyTorch reference, and a microbenchmark.
 2. Human: revoke the HF token that was pasted in chat and replace the `HF_TOKEN` line in `~/.bashrc`. Request Llama 3.1 8B access before the final benchmarks. Allow GPU performance counters in NVIDIA App when an ncu summary is wanted.
 
 ## 13. Change log
@@ -261,3 +265,4 @@ Full entries are in `docs/DECISIONS.md`.
 - 2026-10-09 P4.2: a full KV pool preempts the newest other running request and prefills it again later. A squeezed pool still finishes every request with the same tokens.
 - 2026-10-10 P4.3: `Engine.step` schedules, runs, samples, and frees finished sequences. Batched greedy tokens match one-at-a-time tokens.
 - 2026-10-23 P4.4: offline, Poisson, and chunk-size sweeps on Llama-3.2-1B, plus a new vLLM file and plots. Numbers are only in `docs/results/phase4/`. Phase 4 code is complete, waiting for the human review gate.
+- 2026-10-23 P5.1: fused residual add and RMSNorm. The Triton kernel matches the float32 reference. Times and bandwidth are in the phase5 result file. The model forward still uses the PyTorch module. Human asked to start Phase 5.

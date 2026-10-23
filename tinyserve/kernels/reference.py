@@ -227,3 +227,29 @@ def paged_attention_flat(
         )
         pieces.append(attended.squeeze(0).transpose(0, 1))  # [q_len, num_heads, head_dim]
     return torch.cat(pieces, dim=0)  # [num_tokens, num_heads, head_dim]
+
+
+def add_rmsnorm(
+    x: torch.Tensor, residual: torch.Tensor, weight: torch.Tensor, eps: float
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Add a residual, then RMS-normalize, both from the float32 sum.
+
+    The norm has to use the sum before it is rounded into the model dtype.
+    A separate add kernel would store that rounding and the norm would read
+    it back. ``residual_out`` is the sum in ``x.dtype`` for the next layer.
+    The returned norm is ``weight * sum * rsqrt(mean(sum^2) + eps)``.
+    """
+    if x.ndim != 2 or residual.ndim != 2:
+        raise ValueError("x and residual must be [rows, hidden]")
+    if x.shape != residual.shape:
+        raise ValueError("x and residual shapes differ")
+    hidden = x.shape[1]
+    if weight.ndim != 1 or weight.shape[0] != hidden:
+        raise ValueError("weight must be [hidden]")
+    if eps <= 0:
+        raise ValueError("eps must be positive")
+    summed = x.float() + residual.float()  # [rows, hidden]
+    variance = summed.pow(2).mean(dim=-1, keepdim=True)  # [rows, 1]
+    scaled = summed * torch.rsqrt(variance + eps)  # [rows, hidden]
+    normed = (weight.float() * scaled).to(dtype=x.dtype)  # [rows, hidden]
+    return normed, summed.to(dtype=x.dtype)

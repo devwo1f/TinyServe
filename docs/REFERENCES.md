@@ -17,6 +17,7 @@ Papers and projects consulted. Code is never copied from other projects; when an
 - Zhong et al., "DistServe: Disaggregating Prefill and Decoding for Goodput-optimized LLM Serving" (OSDI 2024). https://arxiv.org/abs/2401.09670
 - Zheng et al., "SGLang: Efficient Execution of Structured Language Model Programs" (RadixAttention). https://arxiv.org/abs/2312.07104
 - Zhang and Sennrich, "Root Mean Square Layer Normalization" (NeurIPS 2019). https://arxiv.org/abs/1910.07467
+- Su et al., "RoFormer: Enhanced Transformer with Rotary Position Embedding" (2021). https://arxiv.org/abs/2104.09864
 
 Links for AdaSpec and Nightjar are added when the papers are read.
 
@@ -41,3 +42,4 @@ Links for AdaSpec and Nightjar are added when the papers are read.
 | 2026-10-09 | P4.3 | Orca (already listed above) | One iteration runs every request that has a token ready, samples, and releases finished requests. No code was copied. |
 | 2026-10-23 | P4.4 | Agrawal et al., Sarathi-Serve (already listed above) | A prefill that does not fit the step budget is split so a decode is not stuck behind the whole prompt. The measured tradeoff is throughput against inter-token latency. No code was copied. |
 | 2026-10-23 | P5.1 | Zhang and Sennrich, "Root Mean Square Layer Normalization" (2019), https://arxiv.org/abs/1910.07467 | RMSNorm scales a row by the root mean square. The residual add is fused into that same pass so the norm sees the float32 sum. No code was copied. |
+| 2026-10-23 | P5.2 | Su et al., "RoFormer: Enhanced Transformer with Rotary Position Embedding" (2021), https://arxiv.org/abs/2104.09864 | A head is rotated by an angle that grows with the token position. The kernel uses the half-swap layout already in `model/rope.py`. No code was copied. |

@@ -22,6 +22,20 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-10-23 | HUMAN (via session) | Gate after Phase 4 passed
+
+Human asked to continue into Phase 5.
+
+## 2026-10-23 | Cursor | Task P5.1
+
+**Status:** done
+**What changed:** `kernels/reference.py` `add_rmsnorm` adds a residual in float32 and RMS-normalizes that sum. `kernels/rmsnorm.py` is the Triton kernel, one program per row, used on CUDA. CPU calls the reference. The row is loaded twice so the variance stays on the float32 sum. `bench/microbench/rmsnorm.py` times it against the reference with `triton.testing.do_bench`. The decoder still uses the PyTorch `RMSNorm` module.
+**Tests:** `tests/unit/test_rmsnorm.py`. CPU: float32 matches `RMSNorm(x + residual)` within 1e-6, a one-column row and an empty batch keep their shapes, and the byte counts match the loops. `tests/gpu/test_rmsnorm.py`: Triton matches the reference, float32 within 1e-5 and bf16 within 1e-2, including hidden 1, 17, 64, 2048, and 4096. 7 passed. CPU suite: 132 passed, 10 deselected.
+**Results:** `docs/results/phase5/2026-10-23_p5-1-rmsnorm.jsonl`. bf16, RTX 4060 Laptop, dirty at `8d3b743`. Peak 256e9 bytes/s from the 128-bit 16 Gbps bus. Algorithm bytes over the median `do_bench` time. At 1 by 2048, fused 0.021503999829292297 ms, PyTorch 0.13311999291181564 ms, utilization 0.003720238124770894. At 2048 by 2048, fused 0.18995200097560883 ms, PyTorch 0.9861119985580444 ms, achieved 176668462704.47635 bytes/s, utilization 0.6901111824393608. PyTorch divided by fused there is 5.191374628818299. Nsight Compute was not used.
+**Decisions:** none. Conceptual note in REFERENCES.md.
+**Next step:** P5.2 RoPE kernel. Apply rotary embedding to Q and K in place from positions. Correctness against the PyTorch reference, and a microbenchmark.
+**Questions for the human:** none
+
 ## 2026-10-23 | Cursor | Task P4.4
 
 **Status:** done. Phase 4 code is complete. Do not start Phase 5 until the human writes the review-gate line.

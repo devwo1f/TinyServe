@@ -134,6 +134,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="vLLM offline baseline on the dev model.")
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, default=Path("docs/results/phase2"))
+    parser.add_argument("--tag", default="p2-4-vllm-offline")
     parser.add_argument("--num-requests", type=int, default=8)
     parser.add_argument("--input-len", type=int, default=64)
     parser.add_argument("--output-len", type=int, default=32)
@@ -177,7 +178,7 @@ def main(argv: list[str] | None = None) -> None:
         disable_log_stats=False,
     )
     day = datetime.now(UTC).date().isoformat()
-    path = args.output_dir / f"{day}_p2-4-vllm-offline.jsonl"
+    path = args.output_dir / f"{day}_{args.tag}.jsonl"
     config = {
         "engine": "vllm",
         "vllm_version": vllm.__version__,
@@ -195,6 +196,8 @@ def main(argv: list[str] | None = None) -> None:
         "temperature": 0.0,
         "request_rate": float("inf"),
         "batched": True,
+        "series": "offline",
+        "label": "vllm",
         "max_model_len": args.max_model_len,
         "gpu_memory_utilization": args.gpu_memory_utilization,
         "max_num_seqs": args.max_num_seqs,

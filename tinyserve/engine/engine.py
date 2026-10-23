@@ -196,6 +196,54 @@ class Engine:
                 raise RuntimeError("no token was scheduled; pool or token budget is too small")
         return [self._result(seq) for seq in sequences]
 
+    def prepare_pool(self, prompts: list[list[int]], sampling_params: SamplingParams) -> None:
+        """Size the KV pool for every prompt before the first one arrives.
+
+        A Poisson run submits one request at a time. The pool still has to
+        hold all of them if their stays overlap. Growing it on a later
+        arrival would throw away the pages already in use.
+        """
+        if not isinstance(sampling_params, SamplingParams):
+            raise TypeError("sampling_params must be one SamplingParams for the whole call")
+        if sampling_params.max_tokens < 1:
+            raise ValueError("max_tokens must be at least 1")
+        if not prompts:
+            raise ValueError("prompts is empty")
+        self._live = {}
+        device = next(self.model.parameters()).device
+        dtype = next(self.model.parameters()).dtype
+        self._ensure_pool(self._blocks_for(prompts, sampling_params), device, dtype)
+        if self._scheduler is None:
+            raise RuntimeError("the KV pool is missing")
+        if self._scheduler.running or self._scheduler.waiting:
+            raise RuntimeError("a previous call left sequences in the scheduler")
+
+    def add_request(self, prompt_ids: list[int], sampling_params: SamplingParams) -> Sequence:
+        """Queue one prompt at the moment it arrives. ``step`` runs it later."""
+        if not isinstance(sampling_params, SamplingParams):
+            raise TypeError("sampling_params must be one SamplingParams for the whole call")
+        if self._scheduler is None:
+            raise RuntimeError("the KV pool is missing")
+        device = next(self.model.parameters()).device
+        return self._enqueue(prompt_ids, sampling_params, device)
+
+    def has_pending(self) -> bool:
+        """True while a request is waiting or running.
+
+        The arrival loop sleeps only when this is false. Sleeping while a
+        request is in flight would add that pause to its inter-token gaps.
+        """
+        if self._scheduler is None:
+            return False
+        return bool(self._scheduler.waiting or self._scheduler.running)
+
+    def results(self, sequences: list[Sequence]) -> list[GenerationResult]:
+        """One result per sequence, in the caller's order."""
+        for seq in sequences:
+            if seq.status != SequenceStatus.FINISHED:
+                raise RuntimeError(f"sequence {seq.seq_id} is not finished")
+        return [self._result(seq) for seq in sequences]
+
     @torch.inference_mode()
     def step(self) -> ScheduledBatch:
         """One iteration: schedule, run, sample, update, free finished.

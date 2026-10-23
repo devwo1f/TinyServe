@@ -45,3 +45,12 @@ The script also passes `max_model_len=512`, `gpu_memory_utilization=0.85`, `max_
 Before importing vLLM the script sets `VLLM_USE_FLASHINFER_SAMPLER=0` when it is unset. FlashInfer's sampler JIT-compiles with `nvcc`, and this machine has no CUDA toolkit. Greedy sampling does not use that kernel.
 
 The result file is `docs/results/phase2/2026-10-06_p2-4-vllm-offline.jsonl`. Throughput is the summary line. Inter-token latencies are null: vLLM's request stats expose the first token and the last token, not each gap.
+
+P4.4 reruns the same shape into `docs/results/phase4` so the continuous-batching comparison is a new file, not an edit of the Phase 2 one:
+
+```bash
+HF_HUB_OFFLINE=1 /home/abhay/venvs/tinyserve-vllm/bin/python -m bench.vllm_offline \
+  --model models/Llama-3.2-1B-Instruct \
+  --output-dir docs/results/phase4 \
+  --tag p4-4-vllm-offline
+```

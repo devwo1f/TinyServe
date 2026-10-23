@@ -38,3 +38,4 @@ Links for AdaSpec and Nightjar are added when the papers are read.
 | 2026-10-07 | P4.1 | Agrawal et al., Sarathi-Serve (already listed above), and the continuous-batching loop in Orca / vLLM | Decode tokens are scheduled before prefill. A prompt that does not fit in the leftover budget is split into chunks. No code was copied. |
 | 2026-10-09 | P4.2 | Orca and vLLM (already listed above) | When KV blocks run out, the newest running request is evicted and recomputed later. No code was copied. |
 | 2026-10-09 | P4.3 | Orca (already listed above) | One iteration runs every request that has a token ready, samples, and releases finished requests. No code was copied. |
+| 2026-10-23 | P4.4 | Agrawal et al., Sarathi-Serve (already listed above) | A prefill that does not fit the step budget is split so a decode is not stuck behind the whole prompt. The measured tradeoff is throughput against inter-token latency. No code was copied. |

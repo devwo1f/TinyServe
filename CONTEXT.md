@@ -22,8 +22,8 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 ## 2. Current status
 
 - **Phase:** 4 (Continuous batching)
-- **Last completed task:** P4.3 engine step loop
-- **In progress:** P4.4 offline and Poisson benchmark. Dev environment is WSL2 (D-007). Llama 3.2 access is approved and `Llama-3.2-1B-Instruct` is downloaded locally. Human asked to start Phase 4 on 2026-10-07. Nsight Compute counters are still blocked on the Windows host.
+- **Last completed task:** P4.4 offline, Poisson, and chunk-size benchmark
+- **In progress:** Phase 4 code is complete. Waiting for the human review gate before Phase 5. Dev environment is WSL2 (D-007). Llama 3.2 access is approved and `Llama-3.2-1B-Instruct` is downloaded locally. Nsight Compute counters are still blocked on the Windows host.
 - **Working copy:** `~/TinyServe` inside WSL2 Ubuntu 24.04 (user `abhay`), opened in Cursor via the WSL remote. Do not develop in the old `D:\Projects\TinyServe` Windows copy.
 - **Review gates passed:** Phase 0, Phase 1, Phase 2, and Phase 3 (human asked to start the next phase)
 - **GitHub:** https://github.com/devwo1f/TinyServe (public)
@@ -36,7 +36,7 @@ Honesty constraints (non-negotiable): no fabricated or hand-edited numbers; no n
 | 1 | From-scratch Llama (RoPE w/ Llama 3 scaling, GQA, SwiGLU), safetensors loading, sampler, naive engine, HF parity | done (human asked to start Phase 2) |
 | 2 | Benchmark + profiling harness, HF and vLLM baselines | done (human asked to start Phase 3; ncu counters still blocked on the Windows host) |
 | 3 | Paged KV cache, block manager, KV store, reference paged attention, prefix cache, memory waste | done (human asked to start Phase 4) |
-| 4 | Continuous batching scheduler, chunked prefill, preemption, engine step loop | in progress (P4.3 done) |
+| 4 | Continuous batching scheduler, chunked prefill, preemption, engine step loop, measured concurrency | code complete (waiting for the human review gate) |
 | 5 | Triton kernels: fused add+RMSNorm, RoPE, paged decode attention (split-K and prefill are stretch) | not started |
 | 6 | CUDA graphs for decode | not started |
 | 7 | OpenAI-compatible FastAPI SSE server, engine thread, SLA-aware admission control | not started |
@@ -88,7 +88,7 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `.cursor/rules/tinyserve-workflow.mdc` | Always-on Cursor rule: read CONTEXT.md first, update it each change, commit format, push after every commit |
 | `.gitignore` | Excludes weights, datasets, secrets, profiler outputs, large results |
 | `.gitattributes` | Forces LF line endings (scripts run on Linux/WSL/CI) |
-| `pyproject.toml` | uv project (Python 3.11 only). Base deps: `numpy`, `transformers==5.17.0` (tokenizer and HF reference). Torch `2.14.0` via mutually exclusive extras `cu130` (GPU) / `cpu` (CI) from the official PyTorch indexes. Dev group `pytest` + `ruff`. Pytest markers `gpu`/`slow` (`--strict-markers`), `pythonpath = ["."]`. Ruff: Python files only, line length 100 |
+| `pyproject.toml` | uv project (Python 3.11 only). Base deps: `numpy`, `transformers==5.17.0` (tokenizer and HF reference). Torch `2.14.0` via mutually exclusive extras `cu130` (GPU) / `cpu` (CI) from the official PyTorch indexes. Dev group `pytest`, `ruff`, and `matplotlib` (D-010). Pytest markers `gpu`/`slow` (`--strict-markers`), `pythonpath = ["."]`. Ruff: Python files only, line length 100 |
 | `scripts/env_info.py` | `collect_env_info() -> dict` with fixed `FIELDS` (timestamp, git commit/dirty, python, platform, cpu, torch, torch_cuda, cudnn, triton, cuda_available, gpu_count/name/memory/compute capability, driver). Missing items are None. `--json` flag. Embedded in every result file |
 | `scripts/download_models.sh` | `bash scripts/download_models.sh [dev / dev-spec / final / <repo ids>]` into `models/<name>`. Requires `HF_TOKEN` in the environment (not passed on the command line). One `--include` flag per glob, or the CLI treats extras as filenames and skips the weights. Excludes `original/` (duplicate .pth). Dev model is already at `models/Llama-3.2-1B-Instruct` (safetensors, not committed) |
 | `scripts/download_datasets.sh` | `bash scripts/download_datasets.sh [sharegpt wikitext humaneval]` into `data/` (raw files; filtering happens in `bench/datasets.py`). HumanEval is the official JSONL, not the Hugging Face parquet (D-009). |
@@ -103,7 +103,7 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `tinyserve/config.py` | Torch-free settings. `TinyServeConfig` has sections `model` (model path, tokenizer, dtype `auto`/float32/float16/bfloat16, device, max_model_len, seed), `cache` (block_size 16, gpu_memory_utilization 0.9, memory_safety_margin_gib, num_gpu_blocks_override, enable_prefix_caching), `scheduler` (max_num_batched_tokens 2048, max_num_seqs 64, enable_chunked_prefill), `speculative` (enabled, draft_model, num_speculative_tokens, policy, batch_threshold), `server` (host, port, admission_policy fifo/reject/deadline, TTFT/TPOT SLOs), `benchmark` (workload, num_requests, request_rate, warmup, repeats, seed, ignore_eos, output_dir). API: `apply_overrides(cfg, {"cache.block_size": "32"})`, `add_config_args(parser)` adds `--section.field` flags, `config_from_args(args)`, `cfg.to_dict()` |
 | `tinyserve/engine/sequence.py` | `SamplingParams` (temperature 0 is greedy, top-k -1 is off), `SequenceStatus`, and `Sequence` with the spec Section 9 fields. |
 | `tinyserve/engine/sampler.py` | `sample_token`: temperature, then top-k, then top-p. A per-request `torch.Generator` keeps seeds from sharing the global RNG. |
-| `tinyserve/engine/engine.py` | `step` schedules, runs one forward, samples, and frees finished sequences. `generate_tokens` queues every prompt in the call and loops `step`. A decode samples the logit saved when its context was filled, then the forward runs that new token. Full prompt blocks can stay cached for a later call. `num_blocks` fixes the pool size so a test can force preemption. Stop ids are not emitted. Timing fields are taken when the sampled token's logits are ready, before the forward that stores the token. |
+| `tinyserve/engine/engine.py` | `step` schedules, runs one forward, samples, and frees finished sequences. `generate_tokens` queues every prompt in the call and loops `step`. `prepare_pool` sizes the KV pool for every prompt before the first arrival. `add_request` queues one prompt later. `has_pending` is true while either queue is non-empty, so an arrival loop sleeps only when nothing is in flight. `results` reads finished sequences in caller order. A decode samples the logit saved when its context was filled, then the forward runs that new token. Full prompt blocks can stay cached for a later call. `num_blocks` fixes the pool size so a test can force preemption. Stop ids are not emitted. Timing fields are taken when the sampled token's logits are ready, before the forward that stores the token. |
 | `tinyserve/engine/scheduler.py` | Waiting and running queues. `schedule` runs decodes first, then prefill chunks, within `max_num_batched_tokens` and `max_num_seqs`. It reserves blocks and leaves `num_computed_tokens` for the caller to advance after the forward. When the free list is short, the newest other running request is preempted: its KV is dropped and it is prefilled again later, including tokens it already generated. `finish` removes a sequence from both queues and leaves its blocks allocated. |
 | `tinyserve/engine/model_runner.py` | `prepare_model_input` flattens the new tokens into `input_ids`, `positions`, `slot_mapping`, `query_start_loc`, `seq_lens`, `block_tables` (padded with -1), and `logits_indices`. `run_paged` calls `forward_paged`. `num_computed_tokens` advances only after the forward. |
 | `tinyserve/kv/cache.py` | Paged K/V tensors and the startup block count. Budget is `total * utilization - weights - peak activations - safety margin`. `str(CacheProfile)` is the startup line: blocks and token capacity. Tied weights are counted once. |
@@ -115,9 +115,11 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `bench/datasets.py` | ShareGPT, code (JSON/JSONL), shared-prefix, and synthetic workloads. Length filter, then a hash-ordered subset for a fixed seed. `prompt_token_ids` is what a benchmark must send. |
 | `bench/prefix_cache.py` | Shared-prefix run on Llama-3.2-1B with caching off, then on. Refuses to write if computed prompt tokens do not drop or greedy ids differ. |
 | `bench/kv_waste.py` | Eight variable-length requests on the tiny model. Records each engine step and a concurrent full-length snapshot. Refuses to write if the samples disagree with the block-manager walk. |
-| `bench/offline.py` | `run_offline` runs each sample to a fixed length, drops a separate warmup pass, repeats, and writes one Section 11 JSONL (meta, per-request, summary). Summary percentiles come from the median repeat by output throughput. `request_record` / `write_benchmark_jsonl` are the shared row shape. |
+| `bench/offline.py` | `run_offline` runs each sample to a fixed length, one request at a time, drops a separate warmup pass, repeats, and writes one Section 11 JSONL (meta, per-request, summary). Summary percentiles come from the median repeat by output throughput. `request_record` / `write_benchmark_jsonl` are the shared row shape. |
 | `bench/baselines.py` | `run_hf_generate` times Hugging Face `generate` on the same samples. `profile_generation` writes a `torch.profiler` summary of one TinyServe request. The CLI loads one model at a time. |
-| `bench/vllm_offline.py` | Runs the same synthetic set through vLLM's `LLM.generate` (one batched call per repeat) and writes a Section 11 JSONL. Executed with the separate venv, not TinyServe's. |
+| `bench/batching.py` | Concurrent measurements. `run_concurrent` puts one repeat in a single step loop. `poisson_offsets` rebuilds arrival times from a seed. The CLI writes the naive, batched, Poisson, and chunk-size JSONL files for Llama-3.2-1B. |
+| `bench/plots.py` | Reads Section 11 JSONL and writes the Phase 4 png files. Does not measure, and does not take hand-typed series. |
+| `bench/vllm_offline.py` | Runs the same synthetic set through vLLM's `LLM.generate` (one batched call per repeat) and writes a Section 11 JSONL. `--tag` selects the filename. Executed with the separate venv, not TinyServe's. |
 | `bench/vllm_baseline.md` | Exact install commands, versions, and the run command for that venv (`/home/abhay/venvs/tinyserve-vllm`, vLLM 0.31.0+cu129). |
 | `scripts/profile_target.py` | One greedy naive-engine request. Warmup stays outside `cudaProfilerStart` / `Stop`. |
 | `scripts/profile_nsys.sh` | Nsight Systems timeline of that request. Writes a small JSON summary; the `.nsys-rep` stays in `profiles/`. |
@@ -146,6 +148,7 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `tests/unit/test_datasets.py` | Length filtering and fixed-seed subsets for all four workloads, using in-test fixtures. |
 | `tests/unit/test_offline.py` | Section 11 JSONL schema on the tiny model (written under `tmp_path`, not committed) and median-repeat selection. |
 | `tests/unit/test_baselines.py` | Hugging Face `generate` JSONL shape and a profiler summary, both on the tiny model. |
+| `tests/unit/test_batching.py` | Poisson offsets, a delayed arrival matching an offline batch, JSONL token counts, and a plot written from fixture result files. |
 | `tests/unit/test_vllm_offline.py` | vLLM latency math and fixed-length rows. Does not import vLLM. |
 | `tests/unit/test_profile_summary.py` | Idle-gap math, nsys sqlite name lookup, and ncu CSV bandwidth. No GPU and no Nsight binary. |
 | `tests/gpu/test_llama_parity.py` | (`gpu`, `slow`) Llama-3.2-1B bf16 greedy parity vs Hugging Face. Skipped when the weights are absent. |
@@ -159,6 +162,7 @@ Engine loop runs in a background thread (Phase 7), talking to the async API thro
 | `docs/results/phase2/2026-10-06_p2-5-nsys.json` | Script-written Nsight Systems summary of one naive 1B request (prompt 64, 16 new tokens). Idle fraction is in the summary. Dirty run. No ncu file: counters are blocked on the Windows host. |
 | `docs/results/phase3/2026-10-07_p3-6-prefix-cache.jsonl` | Script-written shared-prefix run on Llama-3.2-1B bf16, four prompts, output length 8, block size 16. Caching off then on. Computed prompt tokens and TTFT percentiles are the summary line. Dirty run. |
 | `docs/results/phase3/2026-10-07_p3-7-kv-waste.jsonl` | Script-written slot samples for eight variable-length requests. Paged waste and contiguous max-length waste are the summary line, per step and with every request live at full length. Dirty run. |
+| `docs/results/phase4/` | Script-written P4.4 sweeps on Llama-3.2-1B bf16, plus png files from `bench/plots.py`. Naive, batched, Poisson rates 1/4/16, chunk budgets 32/128/512, and a new vLLM offline file. Summary lines hold the throughput and latency. Dirty run. The Phase 2 vLLM file was not edited. |
 | `tests/gpu/test_env_info_gpu.py` | (`gpu`) GPU fields are populated |
 
 ## 7. Environment and hardware
@@ -209,6 +213,7 @@ Full entries are in `docs/DECISIONS.md`.
 - D-006: config is torch-free dataclasses with dotted overrides; `dtype="auto"` is resolved by model code in Phase 1.
 - D-008: `transformers==5.17.0` for the tokenizer and the Hugging Face numerical reference.
 - D-009: HumanEval is the official JSONL release, not the Hugging Face parquet, so the dataset loader stays dependency-free.
+- D-010: matplotlib 3.11.2 draws plots from result files. The engine does not import it.
 - D-007: develop in WSL2 Ubuntu 24.04 at `~/TinyServe` (resolves Q-001).
 - Repo is public on GitHub (human choice). Phase 0 was reviewed by starting Phase 1.
 
@@ -221,7 +226,7 @@ Full entries are in `docs/DECISIONS.md`.
 
 ## 12. Next steps
 
-1. P4.4 benchmark: offline and Poisson-rate sweeps on the dev model versus the naive engine and vLLM. Commit result files. The learning note covers the throughput-latency trade-off and the effect of chunk size on p99 ITL.
+1. Human review gate for Phase 4 (how a step is filled, what chunk size did to tail latency on the measured run, and when preemption drops KV). Do not start Phase 5 before that line is in `docs/PROGRESS.md`.
 2. Human: revoke the HF token that was pasted in chat and replace the `HF_TOKEN` line in `~/.bashrc`. Request Llama 3.1 8B access before the final benchmarks. Allow GPU performance counters in NVIDIA App when an ncu summary is wanted.
 
 ## 13. Change log
@@ -255,3 +260,4 @@ Full entries are in `docs/DECISIONS.md`.
 - 2026-10-07 P4.1: the scheduler runs decodes first, then splits prefills into the leftover token budget. Blocks are reserved in that call. Human asked to start Phase 4.
 - 2026-10-09 P4.2: a full KV pool preempts the newest other running request and prefills it again later. A squeezed pool still finishes every request with the same tokens.
 - 2026-10-10 P4.3: `Engine.step` schedules, runs, samples, and frees finished sequences. Batched greedy tokens match one-at-a-time tokens.
+- 2026-10-23 P4.4: offline, Poisson, and chunk-size sweeps on Llama-3.2-1B, plus a new vLLM file and plots. Numbers are only in `docs/results/phase4/`. Phase 4 code is complete, waiting for the human review gate.

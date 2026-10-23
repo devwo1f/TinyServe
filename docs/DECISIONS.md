@@ -57,6 +57,12 @@ Format: `D-<n>` for decisions, `Q-<n>` for open questions. Resolved questions be
 - **Decision:** `scripts/download_datasets.sh humaneval` downloads the official `HumanEval.jsonl.gz` from the openai/human-eval GitHub repo and unpacks `data/humaneval/humaneval.jsonl`. The loader reads a JSON list or JSONL with `prompt` and `canonical_solution` (or `completion`).
 - **Not added:** `datasets`, `pyarrow`.
 
+### D-010: matplotlib 3.11.2 draws plots from result files
+- **Date:** 2026-10-10 (P4.4)
+- **Context:** Spec Section 5 names matplotlib as the plotting library. Spec Section 11 says plots come only from `bench/plots.py` reading committed result files.
+- **Decision:** `matplotlib>=3.9` is in the dev dependency group. `uv lock` resolved 3.11.2. Figures use the Agg backend, so a run does not need a display. The engine does not import matplotlib.
+- **Dependencies added:** matplotlib 3.11.2, plus contourpy, cycler, fonttools, kiwisolver, pillow, pyparsing, python-dateutil, and six, as pinned in `uv.lock`.
+
 ---
 
 ## Open questions

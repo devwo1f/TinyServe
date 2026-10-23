@@ -22,6 +22,16 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-10-23 | Cursor | Task P4.4
+
+**Status:** done. Phase 4 code is complete. Do not start Phase 5 until the human writes the review-gate line.
+**What changed:** `Engine.prepare_pool`, `add_request`, `has_pending`, and `results` let one step loop admit requests as they arrive. `bench/batching.py` times the serial engine with `run_offline` and the shared loop with `run_concurrent`. Poisson offsets are rebuilt from one seed. `bench/plots.py` reads the JSONL files and writes the png files. matplotlib 3.11.2 is locked in the dev group (D-010). vLLM is retagged into `docs/results/phase4` so the Phase 2 file stays as history.
+**Tests:** `tests/unit/test_batching.py`. CPU: a seed rebuilds the same offsets and starts at 0; a delayed arrival matches an offline batch; a concurrent JSONL counts every output token; a fixture directory writes the three png names. CPU suite: 129 passed, 3 deselected. No `pytest -m gpu` (that rewrites the Phase 1 result JSON).
+**Results:** `docs/results/phase4/`, measured dirty at `9f0ba5a`. Synthetic Llama-3.2-1B bf16, 8 requests, warmup 2, 3 repeats, temperature 0, ignore EOS, prefix caching off. Comparison set is prompt 64, output 32, seed 0. Chunk set is prompt 128, output 32, seed 1. Median output throughput: naive 27.151815607747235, batched 79.23819762893967, vLLM 538.9213492983187. Batched divided by that vLLM file is 0.14703109782551507. Poisson output throughput at rates 1, 4, and 16: 43.997764526519234, 71.05169340225018, 79.0944460802214. p99 ITL seconds: 0.07549776608000684, 0.1219061062900073, 0.14259723525999476. Chunk budgets 32, 128, 512: output throughput 51.53778178624679, 69.29115908890815, 79.43782375918802; p99 ITL 0.13736097405001488, 0.12643900614000245, 0.127288989740008. Plots: `p4-4-offline-throughput.png`, `p4-4-poisson.png`, `p4-4-chunk-itl.png`. `greedy_ids_match_serial` is false in the comparison-set config. The Phase 2 serial file (47.23866681302909) is the older contiguous engine and is not this comparison.
+**Decisions:** D-010. Conceptual note in REFERENCES.md.
+**Next step:** Human review gate for Phase 4 (how a step is filled, what chunk size did to tail latency, and when preemption drops KV). Then P5.1 fused add + RMSNorm. Do not start Phase 5 before the gate line is in this file.
+**Questions for the human:** confirm the Phase 4 gate when you can explain the scheduler, the measured chunk-size effect, and preemption without notes.
+
 ## 2026-10-10 | Cursor | Task P4.3
 
 **Status:** done

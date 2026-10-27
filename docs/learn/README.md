@@ -54,3 +54,4 @@ Confirm a gate by adding `## <YYYY-MM-DD> | HUMAN | Gate after Phase <n> passed`
 | [p4-3-engine-step.md](p4-3-engine-step.md) | One engine step: schedule, forward, sample, free finished |
 | [p4-4-benchmark.md](p4-4-benchmark.md) | Throughput versus latency, and what chunk size did to p99 ITL |
 | [p5-1-fused-rmsnorm.md](p5-1-fused-rmsnorm.md) | Fused residual add and RMSNorm, and how bandwidth utilization is counted |
+| [p5-2-rope.md](p5-2-rope.md) | In-place RoPE from positions, and why a short token is a different win than a long one |

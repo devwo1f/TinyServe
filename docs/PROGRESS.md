@@ -22,6 +22,16 @@ Review gate confirmation (written by the human only):
 
 ---
 
+## 2026-10-23 | Cursor | Task P5.2
+
+**Status:** done
+**What changed:** `kernels/reference.py` `apply_rope` rotates each head from positions and returns a new tensor. `kernels/rope.py` writes the same values into Q and K. On CUDA one program owns one head of one token, and Q and K are two launches. CPU copies the reference into the caller's storage. `bench/microbench/rope.py` times both with `triton.testing.do_bench`. Attention still calls the PyTorch rotary helper.
+**Tests:** `tests/unit/test_rope_kernel.py`. CPU: the reference matches `apply_rotary` within 1e-6, including position 0; the in-place write keeps the same storage; an empty token count stays empty; algorithm bytes count Q and K once each way. `tests/gpu/test_rope.py`: Triton matches the reference, float32 within 1e-5 and bf16 within 1e-2, on the listed token and head shapes. 7 passed. CPU suite: 136 passed, 17 deselected.
+**Results:** `docs/results/phase5/2026-10-23_p5-2-rope.jsonl`. bf16, RTX 4060 Laptop, dirty at `c2ce895`. Peak 256e9 bytes/s from the 128-bit 16 Gbps bus. Algorithm bytes over the median `do_bench` time. At 1 token, head dim 64, fused 0.015359999611973763 ms, PyTorch 0.2908160090446472 ms, utilization 0.0026387533218688495. At 2048 tokens, head dim 64, fused 0.5038080215454102 ms, PyTorch 0.5652480125427246 ms, achieved 41658788868.86336 bytes/s, utilization 0.16272964401899748. PyTorch divided by fused there is 1.1219511964276587. Highest utilization is 0.2953254758855431 at 512 tokens, head dim 128. Nsight Compute was not used.
+**Decisions:** none. Conceptual note in REFERENCES.md.
+**Next step:** P5.3 paged decode attention. One program per sequence and KV head, all query heads in that group, online softmax in float32. Correctness on the Section 12 shape grid, a microbenchmark with bandwidth utilization, and a before/after engine benchmark.
+**Questions for the human:** none
+
 ## 2026-10-23 | HUMAN (via session) | Gate after Phase 4 passed
 
 Human asked to continue into Phase 5.

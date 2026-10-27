@@ -253,3 +253,39 @@ def add_rmsnorm(
     scaled = summed * torch.rsqrt(variance + eps)  # [rows, hidden]
     normed = (weight.float() * scaled).to(dtype=x.dtype)  # [rows, hidden]
     return normed, summed.to(dtype=x.dtype)
+
+
+def apply_rope(x: torch.Tensor, positions: torch.Tensor, inv_freq: torch.Tensor) -> torch.Tensor:
+    """Rotate one Q or K tensor. Same pair formula as ``model.rope.rotate_half``.
+
+    ``x`` is ``[num_tokens, num_heads, head_dim]``. ``positions`` is
+    ``[num_tokens]``. ``inv_freq`` is ``[head_dim / 2]`` and already includes
+    Llama 3 scaling, so this function does not know about wavelengths.
+
+    The angle is computed in float32. Cos and sin are then cast to ``x.dtype``
+    before the multiply, which is what the model does with its precomputed
+    tables. Returning a new tensor keeps this reference free of aliasing.
+    """
+    if x.ndim != 3:
+        raise ValueError("x must be [num_tokens, num_heads, head_dim]")
+    num_tokens, _heads, head_dim = x.shape
+    if head_dim % 2 != 0:
+        raise ValueError("head_dim must be even")
+    if positions.shape != (num_tokens,):
+        raise ValueError("positions must be [num_tokens]")
+    half = head_dim // 2
+    if inv_freq.shape != (half,):
+        raise ValueError("inv_freq must be [head_dim / 2]")
+    if num_tokens == 0:
+        return x.clone()
+    # [num_tokens, head_dim / 2]
+    angles = positions.to(device=x.device, dtype=torch.float32).unsqueeze(1) * inv_freq.to(
+        device=x.device, dtype=torch.float32
+    ).unsqueeze(0)
+    cos = angles.cos().to(dtype=x.dtype)  # [num_tokens, half]
+    sin = angles.sin().to(dtype=x.dtype)
+    first = x[..., :half]  # [num_tokens, num_heads, half]
+    second = x[..., half:]
+    rotated_first = first * cos[:, None, :] - second * sin[:, None, :]
+    rotated_second = second * cos[:, None, :] + first * sin[:, None, :]
+    return torch.cat((rotated_first, rotated_second), dim=-1)  # [num_tokens, num_heads, head_dim]
